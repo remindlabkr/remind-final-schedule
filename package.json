@@ -1,0 +1,16 @@
+{
+  "name": "remind-schedule-server",
+  "version": "1.0.0",
+  "description": "리마인드 논술 수강신청 통합 서버 (사이트 + 공용저장 + 결제선생)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cors": "^2.8.5"
+  }
+}
