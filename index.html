@@ -4,14 +4,14 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
 <title>리마인드 논술 수강신청</title>
-<style>html,body{margin:0;padding:0;background:#faf7f2}#root{min-height:100vh}#boot{font-family:-apple-system,sans-serif;color:#00662b;text-align:center;padding:80px 20px;font-size:15px}</style>
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>html,body{margin:0;padding:0;background:#faf7f2}#root{min-height:100vh}#boot{font-family:-apple-system,sans-serif;color:#00662b;text-align:center;padding:60px 18px;font-size:15px;line-height:1.6}</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
 </head>
 <body>
-<div id="root"><div id="boot">불러오는 중… ⏳</div></div>
-<script type="text/babel" data-presets="react">
+<div id="root"><div id="boot">불러오는 중… ⏳<br><span style="font-size:12px;color:#999">첫 로딩은 20~30초 걸릴 수 있어요</span></div></div>
+<script type="text/plain" id="appsrc">
 const {useState, useEffect} = React;
 
 const DAYS = ['일','월','화','수','목','금','토'];
@@ -796,6 +796,24 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
 
+</script>
+<script>
+(function(){
+  function show(msg){var b=document.getElementById('boot');if(b)b.innerHTML='⚠ 화면 조립 중 오류입니다. 아래 내용을 선생님(개발자)에게 보여주세요:<br><pre style="white-space:pre-wrap;text-align:left;font-size:12px;color:#c0392b;background:#fff3f3;padding:12px;border-radius:8px;margin-top:12px">'+String(msg)+'</pre>';}
+  window.addEventListener('error',function(ev){show(ev.message+(ev.filename?(' @ '+ev.filename+':'+ev.lineno):''));});
+  window.addEventListener('unhandledrejection',function(ev){show('통신 오류: '+(ev.reason&&ev.reason.message?ev.reason.message:ev.reason));});
+  function boot(){
+    try{
+      if(!window.React||!window.ReactDOM){throw new Error('React 로딩 실패 (인터넷/CDN 확인)');}
+      if(!window.Babel){throw new Error('Babel 로딩 실패 (인터넷/CDN 확인)');}
+      var src=document.getElementById('appsrc').textContent;
+      var out=Babel.transform(src,{presets:['react']}).code;
+      (0,eval)(out);
+    }catch(e){show(e&&e.message?e.message:e);}
+  }
+  if(document.readyState==='complete'||document.readyState==='interactive'){setTimeout(boot,0);}
+  else{window.addEventListener('DOMContentLoaded',boot);}
+})();
 </script>
 </body>
 </html>
