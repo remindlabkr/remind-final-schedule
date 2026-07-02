@@ -146,8 +146,8 @@ app.post('/api/payssam/callback', (req, res) => {
 });
 
 // ================== 사이트 서빙 ==================
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+// index.html 은 이 파일과 같은 폴더(레포 최상단)에 둡니다.
+app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 app.listen(PORT, () => {
   console.log(`server on :${PORT}  storage=${useRedis ? 'Upstash' : '임시메모리(주의: 재시작 시 사라짐)'}  payssam=${PAYSSAM_API_KEY ? 'ON' : 'OFF'}`);
