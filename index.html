@@ -67,7 +67,7 @@ async function notifyStudent(entry){
       ...(entry.vodItems||[]).map(v=>`[VOD] ${v.name}${v.cheomchak?' (첨삭포함)':''}`)
     ];
     await fetch('/api/notify-student',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({name:entry.studentName,phone:entry.phone,items,total:entry.totalWon,payMethod:entry.payMethod})});
+      body:JSON.stringify({name:entry.studentName,phone:entry.phone,items,month:entry.month})});
   }catch(e){}
 }
 async function payssamCall(base, action, payload){
@@ -276,6 +276,11 @@ function App() {
   const [newPayssamUrl,setNewPayssamUrl]=useState('');
   const [billState,setBillState]=useState('idle');
   const [billInfo,setBillInfo]=useState(null);
+  const [chgReg,setChgReg]=useState(null); // 변경 중인 학생 신청
+  const [chgSel,setChgSel]=useState(new Set());
+  const [chgVOD,setChgVOD]=useState(new Map());
+  const [chgBusy,setChgBusy]=useState(false);
+  const [chgMsg,setChgMsg]=useState('');
   const [adding,setAdding]=useState(false);
   const [newCls,setNewCls]=useState({date:'',time:'20:00',name:'',session:'',type:'before',notes:''});
   const [addingVOD,setAddingVOD]=useState(false);
@@ -397,7 +402,7 @@ function App() {
       cardPhone:isCard?cardPhone.trim():'',
       classes:selCls.map(c=>({id:c.id,name:c.name,session:c.session,date:c.date,time:c.time||'',notes:c.notes,type:c.type})),
       vodItems:selVODArr.map(i=>({id:i.vod.id,name:i.vod.name,cheomchak:i.cheomchak,price:i.cheomchak?90000:50000})),
-      totalWon:grandTotal*10000,at:new Date().toISOString(),
+      totalWon:grandTotal*10000,at:new Date().toISOString(),month:mo+1,
       billId, billStatus:isCard?(payssamUrl?'sending':'manual'):'', shortUrl:''};
     const next=[...regs,entry];
     const ok=await ss(regKey(yr,mo),next);
@@ -463,6 +468,80 @@ function App() {
   }
   async function updateRegById(id,patch){
     setRegs(prev=>{const nx=prev.map(r=>r.id===id?{...r,...patch}:r);ss(regKey(yr,mo),nx);return nx;});
+  }
+  function openChange(r){
+    setChgReg(r);setChgMsg('');
+    setChgSel(new Set((r.classes||[]).map(c=>c.id)));
+    const m=new Map();(r.vodItems||[]).forEach(v=>m.set(v.id,{vod:{id:v.id,name:v.name},cheomchak:v.cheomchak}));
+    setChgVOD(m);
+  }
+  function chgToggleCls(id){setChgSel(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});}
+  function chgToggleVOD(v,cheomchak){setChgVOD(prev=>{const n=new Map(prev);const cur=n.get(v.id);if(cur&&cur.cheomchak===cheomchak)n.delete(v.id);else n.set(v.id,{vod:v,cheomchak});return n;});}
+  async function notifyChange(entry){
+    try{
+      const items=[
+        ...(entry.classes||[]).map(c=>`${c.name}${c.session?` ${c.session}회차`:''}`),
+        ...(entry.vodItems||[]).map(v=>`[VOD] ${v.name}${v.cheomchak?' (첨삭포함)':''}`)
+      ];
+      await fetch('/api/notify-student',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name:entry.studentName,phone:entry.phone,items,month:entry.month||(mo+1),type:'change'})});
+    }catch(e){}
+  }
+  async function applyChange(){
+    if(!chgReg)return;
+    const r=chgReg;
+    const newCls=[...chgSel].map(id=>cls.find(c=>c.id===id)).filter(Boolean);
+    const newVODArr=[...chgVOD.values()];
+    const newWon=(calcLivePrice(newCls)+calcVODTotal(newVODArr))*10000;
+    const prevWon=r.totalWon||0;
+    const diff=newWon-prevWon;
+    if(newCls.length===0&&newVODArr.length===0){setChgMsg('최소 1개는 남겨야 해요. (전체 취소는 삭제 버튼 사용)');return;}
+    setChgBusy(true);setChgMsg('');
+    const patch={
+      classes:newCls.map(c=>({id:c.id,name:c.name,session:c.session,date:c.date,notes:c.notes,type:c.type})),
+      vodItems:newVODArr.map(i=>({id:i.vod.id,name:i.vod.name,cheomchak:i.cheomchak,price:i.cheomchak?90000:50000})),
+      totalWon:newWon, changedAt:new Date().toISOString(),
+    };
+    const isCard=r.payMethod==='카드';
+    const wasPaid=!!r.paid || r.billStatus==='paid';
+    let note='';
+    try{
+      if(isCard && payssamUrl){
+        const productName=[...newCls.map(c=>c.name),...newVODArr.map(v=>v.vod.name)].join(', ').slice(0,90)||'리마인드 논술 수강료';
+        if(diff===0){ note='금액 변동 없음'; }
+        else if(!wasPaid){
+          // 미결제 → 기존 청구서 파기 후 새 금액으로 재발송
+          if(r.billId){try{await payssamCall(payssamUrl,'destroy',{billId:r.billId,price:String(prevWon)});}catch(e){}}
+          const nb=newBillId();
+          const x=await payssamCall(payssamUrl,'send',{billId:nb,memberName:r.studentName,phone:r.cardPhone||r.phone,price:String(newWon),productName,memberCode:r.phone});
+          patch.billId=nb; patch.billStatus=(x.ok&&(x.code==='0000'||x.shortUrl))?'sent':'failed'; patch.shortUrl=x.shortUrl||'';
+          note=`새 청구서 발송(${(newWon/10000)}만원)`;
+        } else if(diff>0){
+          // 결제완료 + 증액 → 차액만 추가 청구
+          const nb=newBillId();
+          const x=await payssamCall(payssamUrl,'send',{billId:nb,memberName:r.studentName,phone:r.cardPhone||r.phone,price:String(diff),productName:`[차액] ${productName}`,memberCode:r.phone});
+          patch.extraBillId=nb; note=`차액 ${(diff/10000)}만원 추가 청구${x.ok?'':' (실패)'}`;
+        } else {
+          // 결제완료 + 감액 → 전체 취소(환불) 후 새 금액 재청구
+          try{await payssamCall(payssamUrl,'cancel',{billId:r.billId,price:String(prevWon),cancelReason:'수강변경'});}catch(e){}
+          const nb=newBillId();
+          const x=await payssamCall(payssamUrl,'send',{billId:nb,memberName:r.studentName,phone:r.cardPhone||r.phone,price:String(newWon),productName,memberCode:r.phone});
+          patch.billId=nb; patch.billStatus=(x.ok&&(x.code==='0000'||x.shortUrl))?'sent':'failed'; patch.shortUrl=x.shortUrl||''; patch.paid=false;
+          note=`기존 결제 취소(환불) 후 ${(newWon/10000)}만원 재청구`;
+        }
+      } else {
+        // 현금
+        if(diff>0) note=`💰 추가 입금 필요: ${(diff/10000)}만원 (계좌 안내)`;
+        else if(diff<0) note=`💸 환불 필요: ${(-diff/10000)}만원 (환불계좌 확인)`;
+        else note='금액 변동 없음';
+      }
+      await updateRegById(r.id,patch);
+      notifyChange({...r,...patch});
+      setChgMsg('✅ 변경 완료! '+note);
+      setToast('변경 완료');setTimeout(()=>setToast(''),2000);
+      setTimeout(()=>setChgReg(null),1800);
+    }catch(e){ setChgMsg('오류: '+(e.message||e)); }
+    setChgBusy(false);
   }
   async function resendBill(r){
     if(!payssamUrl||!r.billId)return;
@@ -614,7 +693,10 @@ function App() {
                       </span>)}
                     </div>
                   </div>
-                  <button className="del-btn" onClick={()=>delReg(r.id)}>✕</button>
+                  <div style={{display:'flex',flexDirection:'column',gap:4,alignItems:'flex-end'}}>
+                    <button className="cp-btn" style={{background:'#EEF2FF',color:'#3730A3',borderColor:'#C7D2FE'}} onClick={()=>openChange(r)}>변경</button>
+                    <button className="del-btn" onClick={()=>delReg(r.id)}>✕</button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -635,10 +717,6 @@ function App() {
                     <option value="after">수능 후 (보라색)</option>
                   </select>
                 </div>
-                <div className="r2">
-                  <input className="ins" type="time" value={newCls.time} onChange={e=>setNewCls(p=>({...p,time:e.target.value}))}/>
-                  <span style={{fontSize:11,color:'#bbb',alignSelf:'center',lineHeight:1.4}}>수업 시작 시간<br/>(1시간 전 알림톡 기준)</span>
-                </div>
                 <input className="ins" placeholder="대학명 (예: 연세대)" value={newCls.name} onChange={e=>setNewCls(p=>({...p,name:e.target.value}))}/>
                 <div className="r2">
                   <input className="ins" type="number" placeholder="회차 (없으면 빈칸)" value={newCls.session} onChange={e=>setNewCls(p=>({...p,session:e.target.value}))}/>
@@ -656,7 +734,7 @@ function App() {
                 <div className="cls-dot" style={{background:col.bd}}/>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:700,color:'#111'}}>{clsLabel(c)}</div>
-                  <div style={{fontSize:11,color:'#888'}}>{c.date}{c.time?` · ${c.time}`:' · 시간 미설정'}</div>
+                  <div style={{fontSize:11,color:'#888'}}>{c.date} · {c.type==='special2'?'20:00~22:00':c.type==='special'?'19:00~22:00':'18:00~20:00 풀이 / 20:00~22:00 본수업'}</div>
                 </div>
                 <button className="del-btn" onClick={()=>delCls(c.id)}>✕</button>
               </div>
@@ -1033,6 +1111,41 @@ function App() {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {chgReg&&(
+        <div className="ov" onClick={()=>{if(!chgBusy)setChgReg(null);}}>
+          <div className="sheet" onClick={e=>e.stopPropagation()}>
+            <div className="sh-hd"><span className="sh-tit">✏️ {chgReg.studentName} 신청 변경</span><button className="sh-cl" onClick={()=>setChgReg(null)}>×</button></div>
+            <p style={{fontSize:11.5,color:'#888',margin:'0 0 8px',lineHeight:1.6}}>수업·VOD를 누르면 금액이 자동 계산돼요. 확정하면 결제선생이 차액/환불을 처리하고 신청내역도 갱신돼요.</p>
+            <span className="co-sec-t">🎥 실시간 강의</span>
+            <div className="sel-box" style={{maxHeight:170,overflowY:'auto'}}>
+              {cls.length===0?<div style={{fontSize:12,color:'#bbb',padding:8}}>이번 달 수업 없음</div>:cls.map(c=>{const on=chgSel.has(c.id);return(
+                <div key={c.id} className="sel-item" onClick={()=>chgToggleCls(c.id)} style={{cursor:'pointer',opacity:on?1:0.55}}>
+                  <span className="sel-nm">{on?'✅':'⬜'} {clsLabel(c)}<span style={{fontSize:11,color:'#bbb',marginLeft:6}}>{fmt(c.date)}</span></span>
+                  <span className="sel-pr">11만원</span>
+                </div>);})}
+            </div>
+            {vodList.length>0&&<span className="co-sec-t" style={{marginTop:8}}>📼 VOD</span>}
+            {vodList.length>0&&<div className="sel-box" style={{maxHeight:170,overflowY:'auto'}}>
+              {vodList.map(v=>{const cur=chgVOD.get(v.id);return(
+                <div key={v.id} className="sel-item">
+                  <span className="sel-nm">{cur?'✅':'⬜'} {v.name}</span>
+                  <span style={{display:'inline-flex',gap:4,whiteSpace:'nowrap'}}>
+                    <button className="cp-btn" style={{background:cur&&cur.cheomchak===true?'#00662b':'#eee',color:cur&&cur.cheomchak===true?'#fff':'#888'}} onClick={()=>chgToggleVOD(v,true)}>첨삭9</button>
+                    <button className="cp-btn" style={{background:cur&&cur.cheomchak===false?'#00662b':'#eee',color:cur&&cur.cheomchak===false?'#fff':'#888'}} onClick={()=>chgToggleVOD(v,false)}>미5삭5</button>
+                  </span>
+                </div>);})}
+            </div>}
+            {(()=>{const nc=[...chgSel].map(id=>cls.find(c=>c.id===id)).filter(Boolean);const nv=[...chgVOD.values()];const nw=(calcLivePrice(nc)+calcVODTotal(nv))*10000;const pv=chgReg.totalWon||0;const d=nw-pv;return(
+              <div className="price-box" style={{marginTop:10}}>
+                <div><span className="price-lbl">기존 {(pv/10000)}만 → 변경 {(nw/10000)}만</span><span className="price-note">{d===0?'변동 없음':d>0?`+${(d/10000)}만원 (${chgReg.payMethod==='카드'?'차액 청구':'추가 입금'})`:`${(d/10000)}만원 (${chgReg.payMethod==='카드'?'취소 후 재청구':'환불'})`}</span></div>
+                <span className="price-v">{(nw/10000)}만원</span>
+              </div>);})()}
+            {chgMsg&&<p style={{fontSize:12.5,fontWeight:700,color:chgMsg.indexOf('✅')===0?'#00662b':'#e53935',marginTop:8,lineHeight:1.5}}>{chgMsg}</p>}
+            <button className="sub-btn" disabled={chgBusy} onClick={applyChange}>{chgBusy?'처리 중…':'변경 확정'}</button>
           </div>
         </div>
       )}

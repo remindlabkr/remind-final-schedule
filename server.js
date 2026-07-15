@@ -38,7 +38,7 @@ const {
   UPSTASH_REDIS_REST_URL = '',
   UPSTASH_REDIS_REST_TOKEN = '',
   SOLAPI_API_KEY = '', SOLAPI_API_SECRET = '', SOLAPI_PFID = '',
-  SOLAPI_TPL_CONFIRM = '', SOLAPI_TPL_REMIND = '', SOLAPI_SENDER = '',
+  SOLAPI_TPL_CONFIRM = '', SOLAPI_TPL_CHANGE = '', SOLAPI_TPL_REMIND = '', SOLAPI_SENDER = '',
   CRON_SECRET = '',
   PAYSSAM_API_KEY = '',
   PAYSSAM_MERCHANT = 'remind-nonsul',
@@ -103,19 +103,21 @@ async function sendAlimtalk({ to, templateId, variables, fallbackText }) {
 
 // --- 신청확정 카톡 (학생이 신청하는 즉시) ---
 app.post('/api/notify-student', async (req, res) => {
-  const { name, phone, items = [], total = 0, payMethod = '' } = req.body || {};
-  if (!solapiReady || !SOLAPI_TPL_CONFIRM) return res.json({ skipped: true, reason: '솔라피 미설정' });
+  const { name, phone, items = [], month = '', type = 'confirm' } = req.body || {};
+  const tpl = type === 'change' ? SOLAPI_TPL_CHANGE : SOLAPI_TPL_CONFIRM;
+  if (!solapiReady || !tpl) return res.json({ skipped: true, reason: '솔라피 미설정' });
   if (!phone || !name) return res.status(400).json({ ok: false, message: '이름/번호 없음' });
   try {
+    // 카카오 규정상 알림톡엔 결제 유도 문구를 넣지 않음(결제 금액은 결제선생 결제톡이 안내)
     const list = items.length ? items.map((s) => `· ${s}`).join('\n') : '수강신청';
-    const won = Number(total || 0).toLocaleString('ko-KR');
+    const word = type === 'change' ? '수강 변경이 정상 처리되었습니다' : '수강신청이 정상 접수되었습니다';
     await sendAlimtalk({
       to: phone,
-      templateId: SOLAPI_TPL_CONFIRM,
-      variables: { '#{이름}': name, '#{신청내역}': list, '#{금액}': won, '#{결제방법}': payMethod || '-' },
-      fallbackText: `[리마인드 논술] ${name}님, 수강신청이 완료되었습니다.\n${list}\n결제금액: ${won}원`,
+      templateId: tpl,
+      variables: { '#{이름}': name, '#{월}': String(month || ''), '#{신청내역}': list },
+      fallbackText: `[리마인드 논술] ${name}님, ${month ? month + '월 ' : ''}${word}.\n${list}`,
     });
-    console.log('confirm sent:', name, phone);
+    console.log(type + ' sent:', name, phone);
     res.json({ ok: true });
   } catch (e) {
     console.error('confirm error', e?.message || e);
@@ -134,6 +136,12 @@ function classStartMs(dateStr, timeStr) {
   if (!dateStr || !timeStr) return null;
   const t = Date.parse(`${dateStr}T${timeStr}:00+09:00`); // 한국시간 기준
   return Number.isNaN(t) ? null : t;
+}
+// 수업 유형별 고정 시간 (실시간풀이 시작 기준으로 1시간 전 알림)
+function clsTimes(type) {
+  if (type === 'special2') return { start: '20:00', puli: '20:00~22:00', main: '20:00~22:00' };
+  if (type === 'special')  return { start: '19:00', puli: '19:00~22:00', main: '19:00~22:00' };
+  return { start: '18:00', puli: '18:00~20:00', main: '20:00~22:00' }; // before/after 파이널
 }
 
 async function runReminders() {
@@ -155,8 +163,9 @@ async function runReminders() {
         checked++;
         // 최신 수업 정보(시간 수정 반영)를 우선 사용
         const live = clsList.find((c) => c.id === rc.id) || rc;
-        const start = classStartMs(live.date, live.time);
-        if (!start) continue;                       // 시간 미설정 → 건너뜀
+        const tt = clsTimes(live.type);
+        const start = classStartMs(live.date, tt.start);
+        if (!start) continue;                       // 날짜 없으면 건너뜀
         const diff = start - now;
         if (diff < 40 * 60000 || diff > 80 * 60000) continue;  // 40~80분 전 구간에서만
 
@@ -168,8 +177,8 @@ async function runReminders() {
           await sendAlimtalk({
             to: reg.phone,
             templateId: SOLAPI_TPL_REMIND,
-            variables: { '#{이름}': reg.studentName || '', '#{수업명}': nm, '#{시간}': live.time || '' },
-            fallbackText: `[리마인드 논술] ${reg.studentName}님, 1시간 뒤 «${nm}» 수업이 시작해요! (${live.time})`,
+            variables: { '#{이름}': reg.studentName || '', '#{풀이시간}': tt.puli, '#{본수업시간}': tt.main },
+            fallbackText: `[리마인드 논술] ${reg.studentName}님, 곧 «${nm}» 수업이 시작해요! 실시간풀이 ${tt.puli} / 본수업 ${tt.main}`,
           });
           await kvSet(dedupe, '1');
           sent++;
