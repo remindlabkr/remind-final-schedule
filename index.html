@@ -459,8 +459,13 @@ function App() {
   }
   async function delReg(id){const next=regs.filter(r=>r.id!==id);await ss(regKey(yr,mo),next);setRegs(next);}
   async function togglePaid(id){
+    const target=regs.find(r=>r.id===id);
     const next=regs.map(r=>r.id===id?{...r,paid:!r.paid}:r);
     await ss(regKey(yr,mo),next);setRegs(next);
+    // 현금 + 발급번호 있음 + 방금 '수납' 처리 + 아직 미발행 → 현금영수증 자동 발행
+    if(target && !target.paid && target.payMethod==='현금' && (target.cashReceipt||'').trim() && !target.crIssued && payssamUrl){
+      issueCashReceipt({...target,paid:true}, true);
+    }
   }
   async function updateRegById(id,patch){
     setRegs(prev=>{const nx=prev.map(r=>r.id===id?{...r,...patch}:r);ss(regKey(yr,mo),nx);return nx;});
@@ -481,6 +486,39 @@ function App() {
       else setToast(x.message||x.msg||'파기 실패');}
     catch(e){setToast('파기 실패');}
     setTimeout(()=>setToast(''),1800);
+  }
+  async function cancelBill(r){
+    if(!payssamUrl||!r.billId)return;
+    if(!window.confirm('결제를 취소(환불)할까요? 결제 완료 건만 가능해요.'))return;
+    setToast('취소 중…');
+    try{const x=await payssamCall(payssamUrl,'cancel',{billId:r.billId,price:String(r.totalWon),cancelReason:'고객요청'});
+      if(x.ok&&x.code==='0000'){await updateRegById(r.id,{billStatus:'cancelled',paid:false});setToast('결제 취소됨');}
+      else setToast(x.message||x.msg||'취소 실패');}
+    catch(e){setToast('취소 실패');}
+    setTimeout(()=>setToast(''),2000);
+  }
+  async function readBill(r){
+    if(!payssamUrl||!r.billId)return;
+    setToast('조회 중…');
+    try{const x=await payssamCall(payssamUrl,'read',{billId:r.billId});
+      const st={F:'결제완료',W:'미결제',C:'취소',D:'파기'}[x.apprState]||'미결제';
+      setToast(`청구서 상태: ${st}`);
+      if(x.apprState==='F')await updateRegById(r.id,{billStatus:'paid',paid:true});}
+    catch(e){setToast('조회 실패');}
+    setTimeout(()=>setToast(''),2200);
+  }
+  async function issueCashReceipt(r,silent){
+    if(!payssamUrl)return;
+    const num=(r.cashReceipt||'').replace(/[^0-9]/g,'');
+    if(!num){if(!silent)setToast('발급번호가 없어요');return;}
+    const bId=r.crBillId||newBillId();
+    const trader=num.length===10?'1':'0'; // 10자리=사업자, 그 외=개인(휴대폰)
+    if(!silent)setToast('현금영수증 발행 중…');
+    try{const x=await payssamCall(payssamUrl,'cashReceipt',{billId:bId,price:String(r.totalWon),issuanceNumber:num,trader});
+      if(x.ok&&x.code==='0000'){await updateRegById(r.id,{crBillId:bId,crIssued:true});setToast('현금영수증 발행 완료!');}
+      else setToast(x.message||x.msg||'현금영수증 발행 실패');}
+    catch(e){setToast('현금영수증 발행 실패');}
+    setTimeout(()=>setToast(''),2400);
   }
   async function refreshBill(r){
     if(!payssamUrl||!r.billId)return;
@@ -568,14 +606,17 @@ function App() {
                     {r.vodItems&&r.vodItems.length>0&&<div style={{fontSize:11.5,color:'#888',marginBottom:4}}>📼 {r.vodItems.map(v=>`${v.name}(${v.cheomchak?'첨삭포함':'첨삭미포함'})`).join(' · ')}</div>}
                     <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
                       <span className={`rtag ${r.payMethod==='카드'?'rtag-card':'rtag-cash'}`}>{r.payMethod}</span>
-                      {r.cashReceipt&&<span style={{fontSize:11,color:'#888'}}>현영: {r.cashReceipt}</span>}
+                      {r.cashReceipt&&<span style={{fontSize:11,color:'#888'}}>현영: {r.cashReceipt}{r.crIssued&&<b style={{color:'#00662b'}}> ✓발행</b>}</span>}
+                      {r.payMethod==='현금'&&(r.cashReceipt||'').trim()&&payssamUrl&&<button className="cp-btn" onClick={()=>issueCashReceipt(r)}>{r.crIssued?'현영 재발행':'현금영수증 발행'}</button>}
                       {r.cardPhone&&<span style={{fontSize:11,color:'#888'}}>결제자: {r.cardPhone}<button className="cp-btn" onClick={()=>copy(r.cardPhone)}>복사</button></span>}
                       <span style={{fontSize:13,fontWeight:700,color:'#00662b'}}>{r.totalWon/10000}만원</span>
                       {r.payMethod==='카드'&&r.billStatus&&<span className="rtag" style={{background:'#EEF2FF',color:'#3730A3',borderColor:'#C7D2FE'}}>청구서 {billLabel(r.billStatus)}</span>}
                       {r.payMethod==='카드'&&r.billId&&payssamUrl&&(<span style={{display:'inline-flex',gap:4}}>
                         <button className="cp-btn" onClick={()=>refreshBill(r)}>결제확인</button>
                         <button className="cp-btn" onClick={()=>resendBill(r)}>재발송</button>
+                        <button className="cp-btn" onClick={()=>readBill(r)}>조회</button>
                         <button className="cp-btn" onClick={()=>destroyBill(r)}>파기</button>
+                        <button className="cp-btn" onClick={()=>cancelBill(r)}>결제취소</button>
                       </span>)}
                     </div>
                   </div>

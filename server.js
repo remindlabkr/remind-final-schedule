@@ -241,6 +241,49 @@ app.post('/api/payssam', async (req, res) => {
       const a = approvals.get(billId);
       return res.json(a ? { code: '0000', ...a } : { code: '0000', apprState: null, billId });
     }
+    // --- 승인취소 (결제완료 청구서를 취소) ---
+    if (action === 'cancel') {
+      const { billId, price, cancelReason } = req.body;
+      const hash = makeHash({ billId, price });
+      const r = await callPayssam('/bill/cancel', { apiKey: PAYSSAM_API_KEY, member: PAYSSAM_MEMBER || PAYSSAM_MERCHANT, merchant: PAYSSAM_MERCHANT, bill: { billId, price: String(price), cancelReason: (cancelReason || '고객요청').slice(0, 20), hash } });
+      if (r.httpOk && r.data?.code === '0000') approvals.set(billId, { apprState: 'C', billId });
+      return res.status(r.httpOk ? 200 : r.status).json({ code: r.data?.code, message: r.data?.msg || r.data?.message, data: r.data?.data, billId });
+    }
+    // --- 청구서 단건 조회 (결제상태) ---
+    if (action === 'read') {
+      const { billId } = req.body;
+      const r = await callPayssam('/bill/read', { apiKey: PAYSSAM_API_KEY, member: PAYSSAM_MEMBER || PAYSSAM_MERCHANT, merchant: PAYSSAM_MERCHANT, bill: { billId } });
+      const d = r.data?.data || {};
+      if (d.apprState) approvals.set(billId, { apprState: d.apprState, apprPrice: d.apprPrice, apprDt: d.apprDt, billId });
+      return res.status(r.httpOk ? 200 : r.status).json({ code: r.data?.code, message: r.data?.msg || r.data?.message, apprState: d.apprState, apprPrice: d.apprPrice, apprDt: d.apprDt, data: d, billId });
+    }
+    // --- 현금영수증 발행 ---
+    if (action === 'cashReceipt') {
+      const { billId, price, issuanceNumber, trader, supplyPrice, tax } = req.body;
+      if (!billId || !price || !issuanceNumber) return res.status(400).json({ code: 'BAD_REQ', message: '현금영수증 필수값 누락(billId/price/issuanceNumber)' });
+      const hash = makeHash({ billId, price });
+      const sp = supplyPrice != null ? String(supplyPrice) : String(price);   // 미전달 시 면세 가정(공급가=결제금액)
+      const tx = tax != null ? String(tax) : '0';
+      const r = await callPayssam('/cash-receipt/issue', {
+        apiKey: PAYSSAM_API_KEY, member: PAYSSAM_MEMBER || PAYSSAM_MERCHANT, merchant: PAYSSAM_MERCHANT,
+        cashReceipt: { billId, price: String(price), supplyPrice: sp, tax: tx, issuanceNumber: String(issuanceNumber), trader: String(trader != null ? trader : '0'), hash },
+      });
+      return res.status(r.httpOk ? 200 : r.status).json({ code: r.data?.code, message: r.data?.msg || r.data?.message, data: r.data?.data, billId });
+    }
+    // --- 현금영수증 취소 ---
+    if (action === 'cashReceiptCancel') {
+      const { billId, price, trader } = req.body;
+      const hash = makeHash({ billId, price });
+      const r = await callPayssam('/cash-receipt/cancel', { apiKey: PAYSSAM_API_KEY, member: PAYSSAM_MEMBER || PAYSSAM_MERCHANT, merchant: PAYSSAM_MERCHANT, cashReceipt: { billId, price: String(price), trader: String(trader != null ? trader : '0'), hash } });
+      return res.status(r.httpOk ? 200 : r.status).json({ code: r.data?.code, message: r.data?.msg || r.data?.message, billId });
+    }
+    // --- 현금영수증 조회 ---
+    if (action === 'cashReceiptRead') {
+      const { billId, price } = req.body;
+      const hash = makeHash({ billId, price });
+      const r = await callPayssam('/cash-receipt/read', { apiKey: PAYSSAM_API_KEY, member: PAYSSAM_MEMBER || PAYSSAM_MERCHANT, merchant: PAYSSAM_MERCHANT, cashReceipt: { billId, price: String(price), hash } });
+      return res.status(r.httpOk ? 200 : r.status).json({ code: r.data?.code, message: r.data?.msg || r.data?.message, data: r.data?.data, billId });
+    }
     return res.status(400).json({ code: 'BAD_ACTION', message: `알 수 없는 action: ${action}` });
   } catch (e) {
     console.error('payssam error', e);
