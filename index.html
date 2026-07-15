@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
-<title>리마인드 논술 · 수요조사 v2</title>
+<title>리마인드 논술</title>
 <style>html,body{margin:0;padding:0;background:#faf7f2}#root{min-height:100vh}#boot{font-family:-apple-system,sans-serif;color:#00662b;text-align:center;padding:60px 18px;font-size:15px;line-height:1.6}</style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
 </head>
 <body>
-<div id="root"><div id="boot">불러오는 중… ⏳ <b>v2</b><br><span style="font-size:12px;color:#999">첫 로딩은 20~30초 걸릴 수 있어요</span></div></div>
+<div id="root"><div id="boot">불러오는 중… ⏳<br><span style="font-size:12px;color:#999">첫 로딩은 20~30초 걸릴 수 있어요</span></div></div>
 <script type="text/plain" id="appsrc">
 const {useState, useEffect} = React;
 
@@ -760,13 +760,13 @@ function App() {
 
   const firstDayIdx=fd(yr,mo),totalDays=dim(yr,mo);
 
-  if(view==='survey'||(siteMode==='survey'&&view==='student')) return (
+  if(view==='survey') return (
     <div style={{background:'#f7f4ef',minHeight:'100vh'}}>
       <style>{CSS}</style>
       {toast&&<div className="toast">{toast}</div>}
       <div className="nv">
         <span className="nv-mo">{mo+1}월 수요조사</span>
-        {siteMode==='signup'&&<button className="nv-adm" onClick={()=>{setView('student');try{window.location.hash='';}catch(e){}}}>← 신청 페이지</button>}
+        <button className="nv-adm" onClick={()=>{setView('student');try{window.location.hash='';}catch(e){}}}>← 사이트로</button>
         <button className="nv-adm" onClick={()=>{setPwInput('');setPwErr(false);setView('adminLogin');}}>관리자</button>
       </div>
       <BrandHero />
@@ -861,6 +861,16 @@ function App() {
 
       <BrandHero />
 
+      {siteMode==='survey' ? (
+        <div style={{padding:'40px 18px 60px'}}>
+          <div style={{background:'#FFF8E1',border:'1.5px solid #F9A825',borderRadius:14,padding:'24px 18px',textAlign:'center'}}>
+            <div style={{fontSize:32,marginBottom:8}}>📋</div>
+            <div style={{fontSize:16,fontWeight:900,color:'#6D4C00',marginBottom:8}}>수강신청 준비 중이에요</div>
+            <div style={{fontSize:13,color:'#9a7b2e',lineHeight:1.7,marginBottom:18}}>지금은 <b>{mo+1}월 수요조사</b> 기간이에요.<br/>듣고 싶은 대학·가능한 시간을 먼저 알려주시면<br/>그에 맞춰 시간표를 열어드려요!</div>
+            <button className="sub-btn" style={{maxWidth:300,margin:'0 auto'}} onClick={()=>{setView('survey');try{window.location.hash='survey';}catch(e){}}}>📋 수요조사 참여하기</button>
+          </div>
+        </div>
+      ) : (<>
       <div style={{padding:'16px 14px 8px',background:'#f7f4ef'}}>
         <span style={{fontFamily:"'Apple SD Gothic Neo','Noto Sans KR',sans-serif",fontSize:22,fontWeight:900,color:'#111',letterSpacing:'-.01em'}}>LIVE <span style={{color:'#00662b'}}>강의</span></span>
       </div>
@@ -921,6 +931,7 @@ function App() {
           <button className="sbar-btn" onClick={openCheckout}>수강신청하기 →</button>
         </div>
       )}
+      </>)}
 
       {lookupView&&(
         <div className="ov" onClick={()=>setLookupView(false)}>
