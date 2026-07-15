@@ -708,7 +708,7 @@ function App() {
       </div>
       <div className="adm">
         <div className="atabs">
-          {[['regs','수강신청 현황'],['survey','수요조사'],['sim','개설 연습'],['classes','수업 관리'],['vod','녹화강의 관리'],['settings','설정']].map(([t,l])=>(
+          {[['regs','수강신청 현황'],['survey','수요조사'],['classes','수업 관리'],['vod','녹화강의 관리'],['settings','설정']].map(([t,l])=>(
             <button key={t} className={`atab${adminTab===t?' on':''}`} onClick={()=>setAdminTab(t)}>{l}</button>
           ))}
         </div>
@@ -756,49 +756,6 @@ function App() {
                 </div>
               </div>
             ))}
-          </div>
-        )}
-        {adminTab==='sim'&&(
-          <div>
-            <div className="acard" style={{marginBottom:12}}>
-              <div style={{fontSize:13,fontWeight:800,color:'#111',marginBottom:6}}>🧪 개설 연습 (시뮬레이션)</div>
-              <p style={{fontSize:11.5,color:'#888',marginBottom:10,lineHeight:1.6}}>실제로 열지 않고 미리 돌려봐요. "이 요일에 이 대학을 열면 몇 명이 듣고, 누가 못 듣는지"를 계산해줘요.</p>
-              <div style={{display:'flex',gap:6}}>
-                <select className="ins" style={{flex:2}} value={simUniv} onChange={e=>setSimUniv(e.target.value)}>
-                  <option value="">대학 선택</option>
-                  {simUnivOptions.map(u=>(<option key={u} value={u}>{u}</option>))}
-                </select>
-                <select className="ins" style={{flex:1}} value={simDay} onChange={e=>setSimDay(parseInt(e.target.value))}>
-                  {SURVEY_DAYS.map(di=>(<option key={di} value={di}>{DAYS[di]}요일</option>))}
-                </select>
-                <button className="add-btn" style={{whiteSpace:'nowrap'}} onClick={simAdd}>추가</button>
-              </div>
-            </div>
-            {simPlan.length>0&&(
-              <div className="acard" style={{marginBottom:12}}>
-                <div style={{fontSize:13,fontWeight:800,color:'#111',marginBottom:8}}>📋 연습 개설 목록</div>
-                {simPlan.map((pl,i)=>(
-                  <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 10px',background:'#f3f0ea',borderRadius:8,marginBottom:6}}>
-                    <span style={{fontSize:12.5,fontWeight:700,color:'#111'}}>{pl.univ} · {DAYS[pl.day]}요일 20:00-22:00</span>
-                    <span style={{display:'inline-flex',alignItems:'center',gap:8}}><span style={{fontSize:12,fontWeight:800,color:'#00662b'}}>{simCount(pl.univ,pl.day)}명</span><button className="del-btn" onClick={()=>simRemove(i)}>✕</button></span>
-                  </div>))}
-                <div style={{display:'flex',gap:10,marginTop:8,fontSize:13,fontWeight:800}}>
-                  <span style={{color:'#00662b'}}>들을 수 있음 {simCoveredIds.size}명</span>
-                  <span style={{color:simUncovered.length?'#c62828':'#bbb'}}>못 들음 {simUncovered.length}명</span>
-                  <span style={{color:'#bbb',fontWeight:500}}>/ 전체 {surveys.filter(s2=>(s2.picks||[]).some(x=>x.u)).length}명</span>
-                </div>
-              </div>)}
-            {simPlan.length>0&&(
-              <div className="acard" style={{border:`1px solid ${simUncovered.length?'#FFCDD2':'#eee'}`}}>
-                <div style={{fontSize:13,fontWeight:800,color:simUncovered.length?'#c62828':'#00662b',marginBottom:8}}>⚠️ 이 계획에서 못 듣는 학생 {simUncovered.length}명</div>
-                {simUncovered.length===0?<div style={{fontSize:12,color:'#00662b',fontWeight:700}}>모두 들을 수 있어요 👍</div>:simUncovered.map(s2=>(
-                  <div key={s2.id} style={{padding:'8px 10px',background:'#FFF6F6',borderRadius:8,marginBottom:6}}>
-                    <div style={{fontSize:12.5,fontWeight:700,color:'#111'}}>{s2.name} <span style={{color:'#00662b',fontSize:11}}>{s2.phone}</span><button className="cp-btn" onClick={()=>copy(s2.phone)}>복사</button></div>
-                    <div style={{fontSize:11,color:'#888',marginTop:2}}>지망: {(s2.picks||[]).filter(x=>x.u).map(x=>x.u).join(', ')||'-'}</div>
-                    <div style={{fontSize:11,color:'#888'}}>가능 요일: {[...new Set((s2.times||[]).map(t=>DAYS[parseInt(String(t).split('-')[0])]))].join('·')||'-'}</div>
-                  </div>))}
-              </div>)}
-            {simPlan.length===0&&<div className="empty-st"><div style={{fontSize:36,marginBottom:10}}>🧪</div><p>위에서 대학·요일을 추가해<br/>조합을 시험해보세요</p></div>}
           </div>
         )}
         {adminTab==='classes'&&(
@@ -941,6 +898,48 @@ function App() {
                     <div style={{fontSize:11,color:'#888'}}>가능 요일: {[...new Set((s2.times||[]).map(t=>DAYS[parseInt(String(t).split('-')[0])]))].join('·')||'-'}</div>
                   </div>))}
               </div>
+
+          <div>
+            <div className="acard" style={{marginBottom:12}}>
+              <div style={{fontSize:13,fontWeight:800,color:'#111',marginBottom:6}}>🧪 개설 연습 (시뮬레이션)</div>
+              <p style={{fontSize:11.5,color:'#888',marginBottom:10,lineHeight:1.6}}>실제로 열지 않고 미리 돌려봐요. "이 요일에 이 대학을 열면 몇 명이 듣고, 누가 못 듣는지"를 계산해줘요.</p>
+              <div style={{display:'flex',gap:6}}>
+                <select className="ins" style={{flex:2}} value={simUniv} onChange={e=>setSimUniv(e.target.value)}>
+                  <option value="">대학 선택</option>
+                  {simUnivOptions.map(u=>(<option key={u} value={u}>{u}</option>))}
+                </select>
+                <select className="ins" style={{flex:1}} value={simDay} onChange={e=>setSimDay(parseInt(e.target.value))}>
+                  {SURVEY_DAYS.map(di=>(<option key={di} value={di}>{DAYS[di]}요일</option>))}
+                </select>
+                <button className="add-btn" style={{whiteSpace:'nowrap'}} onClick={simAdd}>추가</button>
+              </div>
+            </div>
+            {simPlan.length>0&&(
+              <div className="acard" style={{marginBottom:12}}>
+                <div style={{fontSize:13,fontWeight:800,color:'#111',marginBottom:8}}>📋 연습 개설 목록</div>
+                {simPlan.map((pl,i)=>(
+                  <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 10px',background:'#f3f0ea',borderRadius:8,marginBottom:6}}>
+                    <span style={{fontSize:12.5,fontWeight:700,color:'#111'}}>{pl.univ} · {DAYS[pl.day]}요일 20:00-22:00</span>
+                    <span style={{display:'inline-flex',alignItems:'center',gap:8}}><span style={{fontSize:12,fontWeight:800,color:'#00662b'}}>{simCount(pl.univ,pl.day)}명</span><button className="del-btn" onClick={()=>simRemove(i)}>✕</button></span>
+                  </div>))}
+                <div style={{display:'flex',gap:10,marginTop:8,fontSize:13,fontWeight:800}}>
+                  <span style={{color:'#00662b'}}>들을 수 있음 {simCoveredIds.size}명</span>
+                  <span style={{color:simUncovered.length?'#c62828':'#bbb'}}>못 들음 {simUncovered.length}명</span>
+                  <span style={{color:'#bbb',fontWeight:500}}>/ 전체 {surveys.filter(s2=>(s2.picks||[]).some(x=>x.u)).length}명</span>
+                </div>
+              </div>)}
+            {simPlan.length>0&&(
+              <div className="acard" style={{border:`1px solid ${simUncovered.length?'#FFCDD2':'#eee'}`}}>
+                <div style={{fontSize:13,fontWeight:800,color:simUncovered.length?'#c62828':'#00662b',marginBottom:8}}>⚠️ 이 계획에서 못 듣는 학생 {simUncovered.length}명</div>
+                {simUncovered.length===0?<div style={{fontSize:12,color:'#00662b',fontWeight:700}}>모두 들을 수 있어요 👍</div>:simUncovered.map(s2=>(
+                  <div key={s2.id} style={{padding:'8px 10px',background:'#FFF6F6',borderRadius:8,marginBottom:6}}>
+                    <div style={{fontSize:12.5,fontWeight:700,color:'#111'}}>{s2.name} <span style={{color:'#00662b',fontSize:11}}>{s2.phone}</span><button className="cp-btn" onClick={()=>copy(s2.phone)}>복사</button></div>
+                    <div style={{fontSize:11,color:'#888',marginTop:2}}>지망: {(s2.picks||[]).filter(x=>x.u).map(x=>x.u).join(', ')||'-'}</div>
+                    <div style={{fontSize:11,color:'#888'}}>가능 요일: {[...new Set((s2.times||[]).map(t=>DAYS[parseInt(String(t).split('-')[0])]))].join('·')||'-'}</div>
+                  </div>))}
+              </div>)}
+            {simPlan.length===0&&<div className="empty-st"><div style={{fontSize:36,marginBottom:10}}>🧪</div><p>위에서 대학·요일을 추가해<br/>조합을 시험해보세요</p></div>}
+          </div>
 
               <div style={{fontSize:12,fontWeight:800,color:'#111',margin:'14px 0 8px'}}>응답자 {surveys.length}명</div>
               {surveys.map(s2=>(
