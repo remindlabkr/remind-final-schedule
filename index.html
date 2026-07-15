@@ -295,6 +295,7 @@ function App() {
   const [lookupResults,setLookupResults]=useState(null);
   const [lookupView,setLookupView]=useState(false);
   const [siteMode,setSiteMode]=useState('survey'); // 'survey' = 수요조사 중(시간표 숨김) | 'signup' = 수강신청 오픈
+  const [preview,setPreview]=useState(false); // 관리자 미리보기: 수요조사 모드여도 수강신청 페이지를 봄
   const [surveys,setSurveys]=useState([]);
   const [svName,setSvName]=useState('');
   const [svPhone,setSvPhone]=useState('');
@@ -538,7 +539,7 @@ function App() {
         <button className="nv-ar" onClick={prevMo}>←</button>
         <span className="nv-mo">⚙️ {yr}년 {mo+1}월 관리</span>
         <button className="nv-ar" onClick={nextMo}>→</button>
-        <button className="nv-adm" onClick={()=>setView('student')}>학생 보기</button>
+        <button className="nv-adm" onClick={()=>{setPreview(true);setView('student');}}>수강신청 미리보기</button>
       </div>
       <div className="adm">
         <div className="atabs">
@@ -861,7 +862,14 @@ function App() {
 
       <BrandHero />
 
-      {siteMode==='survey' ? (
+      {preview && siteMode==='survey' && (
+        <div style={{background:'#3730A3',color:'#fff',padding:'8px 14px',display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:12,fontWeight:700}}>
+          <span>🔍 미리보기 (학생에겐 '준비 중' 화면이 보여요)</span>
+          <button onClick={()=>{setPreview(false);setView('adminLogin');}} style={{background:'rgba(255,255,255,.2)',border:'1px solid rgba(255,255,255,.4)',color:'#fff',borderRadius:14,padding:'4px 10px',fontSize:11,fontWeight:700,cursor:'pointer',fontFamily:'inherit'}}>관리자로</button>
+        </div>
+      )}
+
+      {(siteMode==='survey' && !preview) ? (
         <div style={{padding:'40px 18px 60px'}}>
           <div style={{background:'#FFF8E1',border:'1.5px solid #F9A825',borderRadius:14,padding:'24px 18px',textAlign:'center'}}>
             <div style={{fontSize:32,marginBottom:8}}>📋</div>
