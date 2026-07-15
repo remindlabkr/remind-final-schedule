@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
-<title>리마인드 논술 수강신청</title>
+<title>리마인드 논술</title>
 <style>html,body{margin:0;padding:0;background:#faf7f2}#root{min-height:100vh}#boot{font-family:-apple-system,sans-serif;color:#00662b;text-align:center;padding:60px 18px;font-size:15px;line-height:1.6}</style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
@@ -31,6 +31,27 @@ function clsLabel(c){
 function clsKey(y,m){ return `r15-cls-${y}-${String(m+1).padStart(2,'0')}`; }
 function regKey(y,m){ return `r15-reg-${y}-${String(m+1).padStart(2,'0')}`; }
 function vodKey(y,m){ return `r15-vod-${y}-${String(m+1).padStart(2,'0')}`; }
+function svKey(y,m){ return `r15-sv-${y}-${String(m+1).padStart(2,'0')}`; }
+
+// ===== 사전 수요조사 =====
+const UNIV_GROUPS=[
+  {label:'최저 3합 6~7', items:['성균관대','서강대','중앙대(인문)']},
+  {label:'최저 2합 4~5', items:['이화여대(인문)','경희대(인문)','한국외대(서울캠)','건국대(인문)','동국대','홍익대','숙명여대','세종대']},
+  {label:'최저 2합 7', items:['성신여대','덕성여대']},
+  {label:'최저 2합 6', items:['한국외대(글로벌캠)','숭실대(인문)']},
+  {label:'최저 없음', items:['연세대(서울)','중앙대(창의형·고3만)','단국대','가톨릭대','광운대','경기대']},
+];
+// 서울/글로벌캠은 순위 통계에서 '한국외대'로 합산(문제유형 동일)
+const canonUniv=(u)=>String(u).replace('(서울캠)','').replace('(글로벌캠)','');
+const SUNEUNG_JEON=new Set(['가톨릭대','홍익대','성신여대','연세대(서울)']); // 수능 전 논술
+// 18:00-20:00 = 실시간 풀이(고정 안내) / 20:00-22:00 = 해설강의(학생이 선택)
+const SLOTS=[
+  {t:'18:00-20:00', tag:'실시간 풀이', fixed:true},
+  {t:'20:00-22:00', tag:'해설강의',   fixed:false},
+];
+const SURVEY_DAYS=[0,1,2,3,4,5]; // 일~금 (토요일 휴무)
+const RANK_PTS=[6,5,4,3,2,1];
+const slotStart=sl=>sl.split('-')[0];
 async function sg(k){try{const r=await fetch('/api/kv/'+encodeURIComponent(k));if(!r.ok)return null;const j=await r.json();return (j&&j.value!=null)?JSON.parse(j.value):null;}catch(e){return null;}}
 async function ss(k,v){try{const r=await fetch('/api/kv/'+encodeURIComponent(k),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:JSON.stringify(v)})});return r.ok;}catch(e){return false;}}
 
@@ -43,6 +64,17 @@ function newBillId(){
 }
 function billLabel(st){
   return ({sending:'발송중',sent:'발송됨',failed:'발송실패',manual:'수동발송',paid:'결제완료',destroyed:'파기됨',cancelled:'결제취소'})[st]||st;
+}
+// 신청확정 알림톡 발송 요청 (서버 경유). 실패해도 신청 자체는 정상 처리됨.
+async function notifyStudent(entry){
+  try{
+    const items=[
+      ...(entry.classes||[]).map(c=>`${c.name}${c.session?` ${c.session}회차`:''}${c.date?` (${c.date}${c.time?' '+c.time:''})`:''}`),
+      ...(entry.vodItems||[]).map(v=>`[VOD] ${v.name}${v.cheomchak?' (첨삭포함)':''}`)
+    ];
+    await fetch('/api/notify-student',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name:entry.studentName,phone:entry.phone,items,total:entry.totalWon,payMethod:entry.payMethod})});
+  }catch(e){}
 }
 async function payssamCall(base, action, payload){
   const url=base.replace(/\/+$/,'');
@@ -251,7 +283,7 @@ function App() {
   const [billState,setBillState]=useState('idle');
   const [billInfo,setBillInfo]=useState(null);
   const [adding,setAdding]=useState(false);
-  const [newCls,setNewCls]=useState({date:'',name:'',session:'',type:'before',notes:''});
+  const [newCls,setNewCls]=useState({date:'',time:'20:00',name:'',session:'',type:'before',notes:''});
   const [addingVOD,setAddingVOD]=useState(false);
   const [newVOD,setNewVOD]=useState('');
   const [payFilter,setPayFilter]=useState('all');
@@ -262,8 +294,66 @@ function App() {
   const [lookupPhone,setLookupPhone]=useState('');
   const [lookupResults,setLookupResults]=useState(null);
   const [lookupView,setLookupView]=useState(false);
+  const [siteMode,setSiteMode]=useState('survey'); // 'survey' = 수요조사 중(시간표 숨김) | 'signup' = 수강신청 오픈
+  const [surveys,setSurveys]=useState([]);
+  const [svName,setSvName]=useState('');
+  const [svPhone,setSvPhone]=useState('');
+  const [svPicks,setSvPicks]=useState([{u:'',etc:''},{u:'',etc:''},{u:'',etc:''},{u:'',etc:''},{u:'',etc:''},{u:'',etc:''}]);
+  const [svTimes,setSvTimes]=useState(new Set());
+  const [svErr,setSvErr]=useState('');
+  const [svDone,setSvDone]=useState(false);
 
   useEffect(()=>{load();},[yr,mo]);
+  useEffect(()=>{
+    function applyHash(){
+      try{
+        const h=window.location.hash||'';
+        const q=window.location.search||'';
+        const path=(window.location.pathname||'').replace(/\/+$/,'');
+        if(path==='/survey'||h==='#survey'||h==='#/survey'||q.indexOf('survey')>-1) setView('survey');
+      }catch(e){}
+    }
+    applyHash();
+    window.addEventListener('hashchange',applyHash);
+    return ()=>window.removeEventListener('hashchange',applyHash);
+  },[]);
+
+  function toggleSvTime(di,si){
+    if(SLOTS[si].fixed) return; // 실시간 풀이 시간은 선택 대상 아님
+    const k=`${di}-${si}`;
+    setSvTimes(prev=>{const n=new Set(prev); n.has(k)?n.delete(k):n.add(k); return n;});
+  }
+  function setPick(i,field,val){
+    setSvPicks(prev=>prev.map((p,idx)=>idx===i?{...p,[field]:val}:p));
+  }
+  async function submitSurvey(){
+    if(!svName.trim()){setSvErr('이름을 입력해주세요.');return;}
+    if(!svPhone.trim()){setSvErr('휴대폰 번호를 입력해주세요.');return;}
+    if(!svPicks.some(p=>p.u==='__etc__'?(p.etc||'').trim():p.u)){setSvErr('희망 대학을 1개 이상 선택해주세요.');return;}
+    if(svTimes.size===0){setSvErr('가능한 시간을 1개 이상 체크해주세요.');return;}
+    setSvErr('');
+    const entry={id:Date.now().toString(),name:svName.trim(),phone:svPhone.trim(),
+      picks:svPicks.map(p=>({u:p.u==='__etc__'?(p.etc||'').trim():p.u})), times:[...svTimes], at:new Date().toISOString()};
+    const next=[...surveys,entry];
+    const ok=await ss(svKey(yr,mo),next);
+    if(ok){setSurveys(next);setSvDone(true);}else{setSvErr('저장에 실패했어요. 다시 시도해주세요.');}
+  }
+  async function saveSiteMode(m){
+    setSiteMode(m); await ss('r15-site-mode',m);
+    setToast(m==='survey'?'수요조사 모드 — 학생에게 시간표가 안 보여요':'수강신청 오픈! 학생이 시간표를 볼 수 있어요');
+    setTimeout(()=>setToast(''),2600);
+  }
+  async function delSurvey(id){
+    const next=surveys.filter(x=>x.id!==id);
+    await ss(svKey(yr,mo),next);setSurveys(next);
+  }
+  function openClassFromSlot(di,si){
+    if(SLOTS[si].fixed) return;
+    setNewCls(p=>({...p,time:slotStart(SLOTS[si].t)}));
+    setAdminTab('classes');setAdding(true);
+    setToast(`${DAYS[di]}요일 ${slotStart(SLOTS[si].t)} → 날짜와 대학을 입력하세요`);
+    setTimeout(()=>setToast(''),3000);
+  }
 
   async function load(){
     setLoading(true);
@@ -272,6 +362,8 @@ function App() {
     const rd=await sg(regKey(yr,mo));setRegs(rd||[]);
     const vd=await sg(vodKey(yr,mo));
     if(vd){setVodList(vd);}else if(yr===2026&&mo===7){setVodList(SAMPLE_VOD);await ss(vodKey(yr,mo),SAMPLE_VOD);}else{setVodList([]);}
+    const svd=await sg(svKey(yr,mo));setSurveys(svd||[]);
+    const sm=await sg('r15-site-mode');if(sm==='signup'||sm==='survey')setSiteMode(sm);
     const sp=await sg('r15-admin-pw');if(typeof sp==='string'&&sp)setPw(sp);
     const sw=await sg('r15-webhook');if(typeof sw==='string')setWh(sw);
     const pu=await sg('r15-payssam-url');if(typeof pu==='string')setPayssamUrl(pu);
@@ -308,7 +400,7 @@ function App() {
     const entry={id:Date.now().toString(),studentName:sName.trim(),phone:sPhone.trim(),payMethod,
       cashReceipt:payMethod==='현금'?cashReceipt.trim():'',
       cardPhone:isCard?cardPhone.trim():'',
-      classes:selCls.map(c=>({id:c.id,name:c.name,session:c.session,date:c.date,notes:c.notes,type:c.type})),
+      classes:selCls.map(c=>({id:c.id,name:c.name,session:c.session,date:c.date,time:c.time||'',notes:c.notes,type:c.type})),
       vodItems:selVODArr.map(i=>({id:i.vod.id,name:i.vod.name,cheomchak:i.cheomchak,price:i.cheomchak?90000:50000})),
       totalWon:grandTotal*10000,at:new Date().toISOString(),
       billId, billStatus:isCard?(payssamUrl?'sending':'manual'):'', shortUrl:''};
@@ -316,6 +408,7 @@ function App() {
     const ok=await ss(regKey(yr,mo),next);
     if(!ok){setCoErr('저장에 실패했어요.');return;}
     setRegs(next);setDoneTotal(grandTotal);setSelected(new Set());setSelVOD(new Map());setCoDone(true);
+    notifyStudent(entry);
     if(wh)try{fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(entry)});}catch{}
     // 카드결제 → 결제선생 청구서 자동 발송
     if(isCard){
@@ -344,11 +437,11 @@ function App() {
 
   async function addCls(){
     if(!newCls.date||!newCls.name.trim())return;
-    const c={id:Date.now().toString(),date:newCls.date,name:newCls.name.trim(),
+    const c={id:Date.now().toString(),date:newCls.date,time:newCls.time||'',name:newCls.name.trim(),
       session:newCls.session?parseInt(newCls.session):null,type:newCls.type,notes:newCls.notes.trim()};
     const next=[...cls,c].sort((a,b)=>a.date.localeCompare(b.date));
     await ss(clsKey(yr,mo),next);setCls(next);
-    setNewCls({date:'',name:'',session:'',type:'before',notes:''});setAdding(false);
+    setNewCls({date:'',time:'20:00',name:'',session:'',type:'before',notes:''});setAdding(false);
   }
   async function delCls(id){
     const next=cls.filter(c=>c.id!==id);await ss(clsKey(yr,mo),next);setCls(next);
@@ -449,7 +542,7 @@ function App() {
       </div>
       <div className="adm">
         <div className="atabs">
-          {[['regs','수강신청 현황'],['classes','수업 관리'],['vod','녹화강의 관리'],['settings','설정']].map(([t,l])=>(
+          {[['regs','수강신청 현황'],['survey','수요조사'],['classes','수업 관리'],['vod','녹화강의 관리'],['settings','설정']].map(([t,l])=>(
             <button key={t} className={`atab${adminTab===t?' on':''}`} onClick={()=>setAdminTab(t)}>{l}</button>
           ))}
         </div>
@@ -506,6 +599,10 @@ function App() {
                     <option value="after">수능 후 (보라색)</option>
                   </select>
                 </div>
+                <div className="r2">
+                  <input className="ins" type="time" value={newCls.time} onChange={e=>setNewCls(p=>({...p,time:e.target.value}))}/>
+                  <span style={{fontSize:11,color:'#bbb',alignSelf:'center',lineHeight:1.4}}>수업 시작 시간<br/>(1시간 전 알림톡 기준)</span>
+                </div>
                 <input className="ins" placeholder="대학명 (예: 연세대)" value={newCls.name} onChange={e=>setNewCls(p=>({...p,name:e.target.value}))}/>
                 <div className="r2">
                   <input className="ins" type="number" placeholder="회차 (없으면 빈칸)" value={newCls.session} onChange={e=>setNewCls(p=>({...p,session:e.target.value}))}/>
@@ -523,7 +620,7 @@ function App() {
                 <div className="cls-dot" style={{background:col.bd}}/>
                 <div style={{flex:1}}>
                   <div style={{fontSize:13,fontWeight:700,color:'#111'}}>{clsLabel(c)}</div>
-                  <div style={{fontSize:11,color:'#888'}}>{c.date}</div>
+                  <div style={{fontSize:11,color:'#888'}}>{c.date}{c.time?` · ${c.time}`:' · 시간 미설정'}</div>
                 </div>
                 <button className="del-btn" onClick={()=>delCls(c.id)}>✕</button>
               </div>
@@ -551,8 +648,86 @@ function App() {
             ))}
           </div>
         )}
+        {adminTab==='survey'&&(
+          <div>
+            <div className="acard" style={{marginBottom:12}}>
+              <div style={{fontSize:13,fontWeight:800,color:'#111',marginBottom:6}}>📋 수요조사 링크</div>
+              <div style={{fontSize:11.5,color:'#888',marginBottom:8,lineHeight:1.6}}>이 링크를 공지에 넣으세요. 학생이 희망 대학과 가능한 시간을 입력해요.</div>
+              <div style={{fontSize:12,fontWeight:700,color:'#00662b',background:'#f3f0ea',padding:'8px 10px',borderRadius:8,wordBreak:'break-all',marginBottom:8}}>{typeof window!=='undefined'?window.location.origin+'/survey':''}</div>
+              <button className="cp-btn" onClick={()=>copy(window.location.origin+'/survey')}>링크 복사</button>
+              <span style={{fontSize:11,color:'#bbb',marginLeft:8}}>응답 {surveys.length}명</span>
+            </div>
+
+            {surveys.length===0?(<div className="empty-st"><div style={{fontSize:36,marginBottom:10}}>📋</div><p>아직 응답이 없어요</p></div>):(<>
+              <div className="acard" style={{marginBottom:12}}>
+                <div style={{fontSize:13,fontWeight:800,color:'#111',marginBottom:8}}>🏫 대학 인기 순위 <span style={{fontSize:11,fontWeight:500,color:'#bbb'}}>(1순위 6점 … 6순위 1점)</span></div>
+                {svRanked.map(([k,v],i)=>(
+                  <div key={k} style={{display:'flex',alignItems:'center',gap:8,marginBottom:5}}>
+                    <span style={{fontSize:12,fontWeight:800,color:i<3?'#00662b':'#bbb',width:20}}>{i+1}</span>
+                    <span style={{fontSize:13,fontWeight:700,color:'#111',flex:1}}>{k}{svVariant[k]&&<span style={{fontSize:10.5,fontWeight:500,color:'#999',marginLeft:5}}>({Object.entries(svVariant[k]).map(([vn,c])=>`${vn.replace('한국외대','').replace(/[()]/g,'')} ${c}`).join(' · ')})</span>}</span>
+                    <div style={{flex:2,height:8,background:'#f0ece5',borderRadius:5,overflow:'hidden'}}>
+                      <div style={{width:`${(v/svRanked[0][1])*100}%`,height:'100%',background:i<3?'#00662b':'#c9c2b6'}}/>
+                    </div>
+                    <span style={{fontSize:11,fontWeight:700,color:'#888',width:32,textAlign:'right'}}>{v}점</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="acard" style={{marginBottom:12}}>
+                <div style={{fontSize:13,fontWeight:800,color:'#111',marginBottom:4}}>🕒 가능 시간 히트맵</div>
+                <div style={{fontSize:11.5,color:'#888',marginBottom:10,lineHeight:1.6}}>20:00-22:00 해설강의 기준. 진할수록 많이 겹쳐요.<br/><b>칸을 누르면 그 시간으로 수업 추가</b>로 넘어가요. (토요일 휴무)</div>
+                <div style={{overflowX:'auto'}}>
+                  <table style={{borderCollapse:'collapse',fontSize:11,width:'100%'}}>
+                    <thead><tr><th style={{padding:3,width:74}}></th>{SURVEY_DAYS.map(di=>(<th key={di} style={{padding:'3px 2px',fontSize:12,fontWeight:800,color:di===0?'#e57373':'#666'}}>{DAYS[di]}</th>))}</tr></thead>
+                    <tbody>
+                      {SLOTS.filter(sl=>!sl.fixed).map(sl=>{
+                        const si=SLOTS.indexOf(sl);
+                        return (
+                        <tr key={sl.t}>
+                          <td style={{padding:'3px 6px 3px 0',whiteSpace:'nowrap'}}>
+                            <div style={{fontSize:10.5,color:'#888',fontWeight:700}}>{sl.t}</div>
+                            <div style={{fontSize:9.5,color:'#00662b'}}>{sl.tag}</div>
+                          </td>
+                          {SURVEY_DAYS.map(di=>{
+                            const n=svHeat[`${di}-${si}`]||0;
+                            const a=n===0?0:0.15+0.85*(n/svMax);
+                            return (<td key={di} onClick={()=>openClassFromSlot(di,si)} title={`${DAYS[di]} ${sl.t} · ${n}명`}
+                              style={{padding:0,cursor:'pointer'}}>
+                              <div style={{background:n?`rgba(0,102,43,${a})`:'#f3f0ea',color:a>0.55?'#fff':'#999',height:36,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,borderRadius:5,margin:1.5,fontSize:13}}>{n||''}</div>
+                            </td>);
+                          })}
+                        </tr>);
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div style={{fontSize:12,fontWeight:800,color:'#111',margin:'14px 0 8px'}}>응답자 {surveys.length}명</div>
+              {surveys.map(s2=>(
+                <div key={s2.id} className="acard" style={{display:'flex',alignItems:'flex-start',gap:8}}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:700,color:'#111'}}>{s2.name} <span style={{fontSize:11,color:'#00662b',fontWeight:700}}>{s2.phone}</span></div>
+                    <div style={{fontSize:11.5,color:'#888',marginTop:3,lineHeight:1.6}}>
+                      {(s2.picks||[]).filter(p=>p.u).map((p,i)=>`${i+1}. ${p.u}`).join(' / ')}
+                    </div>
+                    <div style={{fontSize:11,color:'#bbb',marginTop:2}}>가능 시간 {(s2.times||[]).length}칸</div>
+                  </div>
+                  <button className="del-btn" onClick={()=>delSurvey(s2.id)}>✕</button>
+                </div>
+              ))}
+            </>)}
+          </div>
+        )}
         {adminTab==='settings'&&(
           <div className="set-box">
+            <div className="set-h">사이트 모드 ⭐</div>
+            <div style={{display:'flex',gap:8,marginBottom:6}}>
+              <button onClick={()=>saveSiteMode('survey')} style={{flex:1,padding:'12px 8px',borderRadius:10,fontFamily:'inherit',fontSize:12.5,fontWeight:800,cursor:'pointer',border:`2px solid ${siteMode==='survey'?'#F9A825':'#e6e1d8'}`,background:siteMode==='survey'?'#FFF8E1':'#fff',color:siteMode==='survey'?'#6D4C00':'#bbb'}}>📋 수요조사 중<br/><span style={{fontSize:10.5,fontWeight:500}}>시간표 숨김</span></button>
+              <button onClick={()=>saveSiteMode('signup')} style={{flex:1,padding:'12px 8px',borderRadius:10,fontFamily:'inherit',fontSize:12.5,fontWeight:800,cursor:'pointer',border:`2px solid ${siteMode==='signup'?'#00662b':'#e6e1d8'}`,background:siteMode==='signup'?'#E8F5EE':'#fff',color:siteMode==='signup'?'#004d20':'#bbb'}}>🎥 수강신청 오픈<br/><span style={{fontSize:10.5,fontWeight:500}}>시간표 공개</span></button>
+            </div>
+            <p className="set-hint" style={{marginBottom:20}}>시간표 확정 전엔 <b>수요조사 중</b>으로 두세요. 학생이 메인 주소로 와도 설문만 보여요.</p>
+
             <div className="set-h">Make 웹훅 URL</div>
             <input className="inp" placeholder="https://hook.make.com/..." value={newWh||wh} onChange={e=>setNewWh(e.target.value)}/>
             <p className="set-hint">학생 신청 시 이 URL로 데이터 전달</p>
@@ -570,7 +745,107 @@ function App() {
     </div>
   );
 
+  // 수요조사 집계
+  const svRank={}, svVariant={};
+  surveys.forEach(s2=>(s2.picks||[]).forEach((p,i)=>{
+    if(!p.u)return;
+    const k=canonUniv(p.u);
+    svRank[k]=(svRank[k]||0)+(RANK_PTS[i]||0);
+    if(p.u!==k){ svVariant[k]=svVariant[k]||{}; svVariant[k][p.u]=(svVariant[k][p.u]||0)+1; }
+  }));
+  const svRanked=Object.entries(svRank).sort((a,b)=>b[1]-a[1]);
+  const svHeat={};
+  surveys.forEach(s2=>(s2.times||[]).forEach(t=>{svHeat[t]=(svHeat[t]||0)+1;}));
+  const svMax=Math.max(1,...Object.values(svHeat),1);
+
   const firstDayIdx=fd(yr,mo),totalDays=dim(yr,mo);
+
+  if(view==='survey'||(siteMode==='survey'&&view==='student')) return (
+    <div style={{background:'#f7f4ef',minHeight:'100vh'}}>
+      <style>{CSS}</style>
+      {toast&&<div className="toast">{toast}</div>}
+      <div className="nv">
+        <span className="nv-mo">{mo+1}월 수요조사</span>
+        {siteMode==='signup'&&<button className="nv-adm" onClick={()=>{setView('student');try{window.location.hash='';}catch(e){}}}>← 신청 페이지</button>}
+        <button className="nv-adm" onClick={()=>{setPwInput('');setPwErr(false);setView('adminLogin');}}>관리자</button>
+      </div>
+      <BrandHero />
+      <div style={{padding:'16px 14px 40px'}}>
+        {svDone?(
+          <div className="done" style={{padding:'40px 20px'}}>
+            <div className="done-ic">✅</div>
+            <div className="done-t">제출 완료!</div>
+            <div className="done-sub">응답해줘서 고마워요.<br/>시간표가 확정되면 안내드릴게요!</div>
+          </div>
+        ):(<>
+          <div className="acard" style={{marginBottom:12}}>
+            <div style={{fontSize:15,fontWeight:900,color:'#111',marginBottom:6}}>📋 {mo+1}월 수강 수요조사</div>
+            <div style={{fontSize:12.5,color:'#888',lineHeight:1.7}}>듣고 싶은 대학과 가능한 시간을 알려주세요.<br/>많이 겹치는 대학·시간부터 수업을 열어요!</div>
+          </div>
+
+          <div className="fg"><label className="lb">이름 *</label><input className="inp" placeholder="홍길동" value={svName} onChange={e=>setSvName(e.target.value)}/></div>
+          <div className="fg"><label className="lb">휴대폰 번호 *</label><input className="inp" type="tel" placeholder="010-0000-0000" value={svPhone} onChange={e=>setSvPhone(e.target.value)}/></div>
+
+          <div className="fg">
+            <label className="lb">희망 대학 (1순위부터) *</label>
+            <p style={{fontSize:11.5,color:'#bbb',margin:'0 0 4px',lineHeight:1.6}}>가장 듣고 싶은 순서대로 골라주세요. (다 안 채워도 돼요)<br/><span style={{color:'#9a7b2e'}}>💡 예지T가 8월에 들으면 좋은 학교 위주로 엄선했어요. 웬만하면 이 목록 안에서 고르는 걸 추천해요!</span><br/><span style={{color:'#e57373'}}>‘· 수능전’ 표시 학교는 수능 전에 논술을 봐요.</span></p>
+            {svPicks.map((p,i)=>(
+              <div key={i} style={{marginBottom:6}}>
+                <div style={{display:'flex',alignItems:'center',gap:6}}>
+                  <span style={{fontSize:12,fontWeight:800,color:(p.u&&p.u!=='__etc__')||(p.u==='__etc__'&&p.etc)?'#00662b':'#ccc',width:18}}>{i+1}</span>
+                  <select className="ins" style={{flex:1}} value={p.u} onChange={e=>setPick(i,'u',e.target.value)}>
+                    <option value="">대학 선택</option>
+                    {UNIV_GROUPS.map(g=>(
+                      <optgroup key={g.label} label={g.label}>
+                        {g.items.map(u=>(<option key={u+g.label} value={u}>{u}{SUNEUNG_JEON.has(u)?' · 수능전':''}</option>))}
+                      </optgroup>
+                    ))}
+                    <option value="__etc__">기타 (직접 입력)</option>
+                  </select>
+                </div>
+                {p.u==='__etc__'&&(
+                  <input className="ins" style={{marginLeft:24,width:'calc(100% - 24px)',marginTop:4}} placeholder="대학·전형 직접 입력" value={p.etc||''} onChange={e=>setPick(i,'etc',e.target.value)}/>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="fg">
+            <label className="lb">가능한 요일 · 시간 *</label>
+            <p style={{fontSize:11.5,color:'#bbb',margin:'0 0 10px',lineHeight:1.6}}>수업은 <b>18:00-20:00 실시간 풀이 → 20:00-22:00 해설강의</b>로 진행돼요.<br/><b style={{color:'#00662b'}}>참여 가능한 요일의 20:00-22:00 칸</b>을 모두 눌러주세요. (토요일은 휴무예요)</p>
+            <div style={{overflowX:'auto'}}>
+              <table style={{borderCollapse:'collapse',width:'100%',fontSize:11}}>
+                <thead><tr><th style={{padding:2,width:74}}></th>{SURVEY_DAYS.map(di=>(<th key={di} style={{padding:'2px',fontSize:12,fontWeight:800,color:di===0?'#e57373':'#666'}}>{DAYS[di]}</th>))}</tr></thead>
+                <tbody>
+                  {SLOTS.map((sl,si)=>(
+                    <tr key={sl.t}>
+                      <td style={{padding:'2px 6px 2px 0',whiteSpace:'nowrap'}}>
+                        <div style={{fontSize:10.5,color:'#888',fontWeight:700}}>{sl.t}</div>
+                        <div style={{fontSize:9.5,color:sl.fixed?'#c9c2b6':'#00662b'}}>{sl.tag}</div>
+                      </td>
+                      {SURVEY_DAYS.map(di=>{
+                        if(sl.fixed) return (<td key={di} style={{padding:0}}>
+                          <div style={{height:34,margin:1.5,borderRadius:6,background:'#f0ece5',border:'1.5px dashed #ddd6c9',display:'flex',alignItems:'center',justifyContent:'center',color:'#b5ab9b',fontWeight:700,fontSize:9.5,textAlign:'center',lineHeight:1.2}}>실시간<br/>풀이</div>
+                        </td>);
+                        const on=svTimes.has(`${di}-${si}`);
+                        return (<td key={di} style={{padding:0}} onClick={()=>toggleSvTime(di,si)}>
+                          <div style={{height:34,margin:1.5,borderRadius:6,cursor:'pointer',background:on?'#00662b':'#fff',border:`1.5px solid ${on?'#00662b':'#e6e1d8'}`,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:800,fontSize:14}}>{on?'✓':''}</div>
+                        </td>);
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p style={{fontSize:11,color:'#bbb',marginTop:6}}>선택한 요일 {svTimes.size}개</p>
+          </div>
+
+          {svErr&&<p className="err">⚠ {svErr}</p>}
+          <button className="sub-btn" onClick={submitSurvey}>제출하기</button>
+        </>)}
+      </div>
+    </div>
+  );
 
   return (
     <div style={{background:'#f7f4ef',minHeight:'100vh'}}>
@@ -755,7 +1030,7 @@ function App() {
                   <span className="co-sec-t">🎥 실시간 강의 ({selCls.length}개)</span>
                   <div className="sel-box">
                     {selCls.map(c=>(<div key={c.id} className="sel-item">
-                      <span className="sel-nm">{clsLabel(c)}<span style={{fontSize:11,color:'#bbb',marginLeft:6}}>{fmt(c.date)}</span></span>
+                      <span className="sel-nm">{clsLabel(c)}<span style={{fontSize:11,color:'#bbb',marginLeft:6}}>{fmt(c.date)}{c.time?` ${c.time}`:''}</span></span>
                       <div style={{display:'flex',alignItems:'center',gap:4}}><span className="sel-pr">11만원</span><button className="sel-x" onClick={()=>toggleSel(c.id)}>×</button></div>
                     </div>))}
                   </div>
@@ -799,15 +1074,13 @@ ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(
 </script>
 <script>
 (function(){
-  function show(msg){var b=document.getElementById('boot');if(b)b.innerHTML='⚠ 화면 조립 중 오류입니다. 아래 내용을 선생님(개발자)에게 보여주세요:<br><pre style="white-space:pre-wrap;text-align:left;font-size:12px;color:#c0392b;background:#fff3f3;padding:12px;border-radius:8px;margin-top:12px">'+String(msg)+'</pre>';}
+  function show(msg){var b=document.getElementById('boot');if(b)b.innerHTML='⚠ 화면 조립 중 오류입니다. 아래 내용을 보여주세요:<br><pre style="white-space:pre-wrap;text-align:left;font-size:12px;color:#c0392b;background:#fff3f3;padding:12px;border-radius:8px;margin-top:12px">'+String(msg)+'</pre>';}
   window.addEventListener('error',function(ev){show(ev.message+(ev.filename?(' @ '+ev.filename+':'+ev.lineno):''));});
-  window.addEventListener('unhandledrejection',function(ev){show('통신 오류: '+(ev.reason&&ev.reason.message?ev.reason.message:ev.reason));});
   function boot(){
     try{
-      if(!window.React||!window.ReactDOM){throw new Error('React 로딩 실패 (인터넷/CDN 확인)');}
-      if(!window.Babel){throw new Error('Babel 로딩 실패 (인터넷/CDN 확인)');}
-      var src=document.getElementById('appsrc').textContent;
-      var out=Babel.transform(src,{presets:['react']}).code;
+      if(!window.React||!window.ReactDOM){throw new Error('React 로딩 실패');}
+      if(!window.Babel){throw new Error('Babel 로딩 실패');}
+      var out=Babel.transform(document.getElementById('appsrc').textContent,{presets:['react']}).code;
       (0,eval)(out);
     }catch(e){show(e&&e.message?e.message:e);}
   }
