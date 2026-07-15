@@ -593,6 +593,18 @@ function App() {
     catch(e){setToast('현금영수증 발행 실패');}
     setTimeout(()=>setToast(''),2400);
   }
+  async function cancelCashReceipt(r){
+    if(!payssamUrl||!r.crBillId)return;
+    if(!window.confirm('현금영수증을 발급 취소할까요?'))return;
+    setToast('현금영수증 취소 중…');
+    const num=(r.cashReceipt||'').replace(/[^0-9]/g,'');
+    const trader=num.length===10?'1':'0';
+    try{const x=await payssamCall(payssamUrl,'cashReceiptCancel',{billId:r.crBillId,price:String(r.totalWon),trader});
+      if(x.ok&&x.code==='0000'){await updateRegById(r.id,{crIssued:false,crCancelled:true});setToast('현금영수증 취소됨');}
+      else setToast(x.message||x.msg||'취소 실패');}
+    catch(e){setToast('취소 실패');}
+    setTimeout(()=>setToast(''),2200);
+  }
   async function refreshBill(r){
     if(!payssamUrl||!r.billId)return;
     setToast('상태 확인 중…');
@@ -680,7 +692,9 @@ function App() {
                     <div style={{display:'flex',alignItems:'center',gap:6,flexWrap:'wrap'}}>
                       <span className={`rtag ${r.payMethod==='카드'?'rtag-card':'rtag-cash'}`}>{r.payMethod}</span>
                       {r.cashReceipt&&<span style={{fontSize:11,color:'#888'}}>현영: {r.cashReceipt}{r.crIssued&&<b style={{color:'#00662b'}}> ✓발행</b>}</span>}
-                      {r.payMethod==='현금'&&(r.cashReceipt||'').trim()&&payssamUrl&&<button className="cp-btn" onClick={()=>issueCashReceipt(r)}>{r.crIssued?'현영 재발행':'현금영수증 발행'}</button>}
+                      {r.payMethod==='현금'&&(r.cashReceipt||'').trim()&&payssamUrl&&(r.crIssued
+                        ? <button className="cp-btn" style={{background:'#FFF3F3',color:'#e53935',borderColor:'#FFCDD2'}} onClick={()=>cancelCashReceipt(r)}>현영 취소</button>
+                        : <button className="cp-btn" onClick={()=>issueCashReceipt(r)}>현금영수증 발행</button>)}
                       {r.cardPhone&&<span style={{fontSize:11,color:'#888'}}>결제자: {r.cardPhone}<button className="cp-btn" onClick={()=>copy(r.cardPhone)}>복사</button></span>}
                       <span style={{fontSize:13,fontWeight:700,color:'#00662b'}}>{r.totalWon/10000}만원</span>
                       {r.payMethod==='카드'&&r.billStatus&&<span className="rtag" style={{background:'#EEF2FF',color:'#3730A3',borderColor:'#C7D2FE'}}>청구서 {billLabel(r.billStatus)}</span>}
@@ -881,9 +895,11 @@ function App() {
                   </span>
                 </div>);})}
             </div>}
-            {(()=>{const nc=[...chgSel].map(id=>cls.find(c=>c.id===id)).filter(Boolean);const nv=[...chgVOD.values()];const nw=(calcLivePrice(nc)+calcVODTotal(nv))*10000;const pv=chgReg.totalWon||0;const d=nw-pv;return(
+            {(()=>{const nc=[...chgSel].map(id=>cls.find(c=>c.id===id)).filter(Boolean);const nv=[...chgVOD.values()];const nw=(calcLivePrice(nc)+calcVODTotal(nv))*10000;const pv=chgReg.totalWon||0;const d=nw-pv;const paid=!!chgReg.paid||chgReg.billStatus==='paid';const card=chgReg.payMethod==='카드';
+              const note=d===0?'금액 변동 없음':card?(paid?(d>0?`결제완료 → 차액 ${(d/10000)}만원만 추가 청구`:`결제완료 → 기존 전액 취소(환불) 후 ${(nw/10000)}만원 재청구`):`미결제 → 새 ${(nw/10000)}만원 청구서로 교체`):(d>0?`+${(d/10000)}만원 추가 입금 안내`:`${(-d/10000)}만원 환불 안내`);
+              return(
               <div className="price-box" style={{marginTop:10}}>
-                <div><span className="price-lbl">기존 {(pv/10000)}만 → 변경 {(nw/10000)}만</span><span className="price-note">{d===0?'변동 없음':d>0?`+${(d/10000)}만원 (${chgReg.payMethod==='카드'?'차액 청구':'추가 입금'})`:`${(d/10000)}만원 (${chgReg.payMethod==='카드'?'취소 후 재청구':'환불'})`}</span></div>
+                <div><span className="price-lbl">기존 {(pv/10000)}만 → 변경 {(nw/10000)}만</span><span className="price-note" style={{color:d>0?'#00662b':d<0?'#e53935':'#888'}}>{note}</span></div>
                 <span className="price-v">{(nw/10000)}만원</span>
               </div>);})()}
             {chgMsg&&<p style={{fontSize:12.5,fontWeight:700,color:chgMsg.indexOf('✅')===0?'#00662b':'#e53935',marginTop:8,lineHeight:1.5}}>{chgMsg}</p>}
