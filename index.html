@@ -658,6 +658,23 @@ function App() {
     </div>
   );
 
+  // 수요조사 집계
+  const svRank={}, svVariant={};
+  surveys.forEach(s2=>(s2.picks||[]).forEach((p,i)=>{
+    if(!p.u)return;
+    const k=canonUniv(p.u);
+    svRank[k]=(svRank[k]||0)+(RANK_PTS[i]||0);
+    if(p.u!==k){ svVariant[k]=svVariant[k]||{}; svVariant[k][p.u]=(svVariant[k][p.u]||0)+1; }
+  }));
+  const svRanked=Object.entries(svRank).sort((a,b)=>b[1]-a[1]);
+  const svYaksulN=surveys.filter(s2=>s2.yaksul==='O').length;
+  const svYaksulSchools={};
+  surveys.forEach(s2=>(s2.yaksulSchools||[]).forEach(u=>{svYaksulSchools[u]=(svYaksulSchools[u]||0)+1;}));
+  const svYaksulRanked=Object.entries(svYaksulSchools).sort((a,b)=>b[1]-a[1]);
+  const svHeat={};
+  surveys.forEach(s2=>(s2.times||[]).forEach(t=>{svHeat[t]=(svHeat[t]||0)+1;}));
+  const svMax=Math.max(1,...Object.values(svHeat),1);
+
   if(view==='admin') return (
     <div style={{background:'#f7f4ef',minHeight:'100vh'}}>
       <style>{CSS}</style>
@@ -921,23 +938,6 @@ function App() {
       )}
     </div>
   );
-
-  // 수요조사 집계
-  const svRank={}, svVariant={};
-  surveys.forEach(s2=>(s2.picks||[]).forEach((p,i)=>{
-    if(!p.u)return;
-    const k=canonUniv(p.u);
-    svRank[k]=(svRank[k]||0)+(RANK_PTS[i]||0);
-    if(p.u!==k){ svVariant[k]=svVariant[k]||{}; svVariant[k][p.u]=(svVariant[k][p.u]||0)+1; }
-  }));
-  const svRanked=Object.entries(svRank).sort((a,b)=>b[1]-a[1]);
-  const svYaksulN=surveys.filter(s2=>s2.yaksul==='O').length;
-  const svYaksulSchools={};
-  surveys.forEach(s2=>(s2.yaksulSchools||[]).forEach(u=>{svYaksulSchools[u]=(svYaksulSchools[u]||0)+1;}));
-  const svYaksulRanked=Object.entries(svYaksulSchools).sort((a,b)=>b[1]-a[1]);
-  const svHeat={};
-  surveys.forEach(s2=>(s2.times||[]).forEach(t=>{svHeat[t]=(svHeat[t]||0)+1;}));
-  const svMax=Math.max(1,...Object.values(svHeat),1);
 
   const firstDayIdx=fd(yr,mo),totalDays=dim(yr,mo);
 
