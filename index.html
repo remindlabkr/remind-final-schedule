@@ -37,6 +37,7 @@ const UNIV_GROUPS=[
 ];
 // 서울/글로벌캠은 순위 통계에서 '한국외대'로 합산(문제유형 동일)
 const canonUniv=(u)=>String(u).replace('(서울캠)','').replace('(글로벌캠)','');
+const baseSchool=(u)=>String(u||'').split(/[(\s·]/)[0]; // '이화여대(인문)'→'이화여대', '동국대 2024...'→'동국대'
 const SUNEUNG_JEON=new Set(['가톨릭대','홍익대','성신여대','연세대(서울)']); // 수능 전 논술
 const YAKSUL_UNIVS=['가천대','동덕여대','삼육대','서경대','수원대','신한대','을지대','한신대','고려대(세종)','한국공학대']; // 약술형(수능형) 논술
 // 18:00-20:00 = 실시간 풀이(고정 안내) / 20:00-22:00 = 해설강의(학생이 선택)
@@ -303,6 +304,10 @@ function App() {
   const [svTimes,setSvTimes]=useState(new Set());
   const [svYaksul,setSvYaksul]=useState('');            // 'O' 관심 / 'X' 없음
   const [svYaksulSet,setSvYaksulSet]=useState(new Set());
+  const [svUniv,setSvUniv]=useState(''); // 히트맵 대학 필터 ('' = 전체)
+  const [simPlan,setSimPlan]=useState([]); // 개설 연습: [{univ, day}]
+  const [simUniv,setSimUniv]=useState('');
+  const [simDay,setSimDay]=useState(1);
   const [svErr,setSvErr]=useState('');
   const [svDone,setSvDone]=useState(false);
 
@@ -671,6 +676,22 @@ function App() {
   const svYaksulSchools={};
   surveys.forEach(s2=>(s2.yaksulSchools||[]).forEach(u=>{svYaksulSchools[u]=(svYaksulSchools[u]||0)+1;}));
   const svYaksulRanked=Object.entries(svYaksulSchools).sort((a,b)=>b[1]-a[1]);
+  const simUnivOptions=[...new Set(surveys.flatMap(s2=>(s2.picks||[]).map(x=>baseSchool(x.u)).filter(Boolean)))];
+  function simAdd(){ if(!simUniv)return; const key=simUniv+'-'+simDay; if(simPlan.some(x=>x.univ+'-'+x.day===key))return; setSimPlan(prev=>[...prev,{univ:simUniv,day:simDay}]); }
+  function simRemove(i){ setSimPlan(prev=>prev.filter((_,idx)=>idx!==i)); }
+  function simCount(univ,day){ return surveys.filter(s2=>{const picks=(s2.picks||[]).map(x=>baseSchool(x.u));const days=new Set((s2.times||[]).map(t=>parseInt(String(t).split('-')[0])));return picks.includes(univ)&&days.has(day);}).length; }
+  const simCoveredIds=new Set();
+  surveys.forEach(s2=>{const picks=(s2.picks||[]).map(x=>baseSchool(x.u)).filter(Boolean);const days=new Set((s2.times||[]).map(t=>parseInt(String(t).split('-')[0])));if(simPlan.some(pl=>picks.includes(pl.univ)&&days.has(pl.day)))simCoveredIds.add(s2.id);});
+  const simUncovered=surveys.filter(s2=>(s2.picks||[]).some(x=>x.u)&&!simCoveredIds.has(s2.id));
+  // 소외(미배정) 학생: 지망 대학·가능 요일에 열린 수업이 하나도 없는 응답자
+  const openedSchoolDays=cls.map(c=>({sch:baseSchool(c.name),day:new Date(c.date+'T00:00:00').getDay()}));
+  const uncovered=surveys.filter(s2=>{
+    const picks=(s2.picks||[]).map(x=>baseSchool(x.u)).filter(Boolean);
+    if(picks.length===0)return false;
+    const days=new Set((s2.times||[]).map(t=>parseInt(String(t).split('-')[0])));
+    const covered=openedSchoolDays.some(o=>picks.includes(o.sch)&&days.has(o.day));
+    return !covered;
+  });
   const svHeat={};
   surveys.forEach(s2=>(s2.times||[]).forEach(t=>{svHeat[t]=(svHeat[t]||0)+1;}));
   const svMax=Math.max(1,...Object.values(svHeat),1);
@@ -687,7 +708,7 @@ function App() {
       </div>
       <div className="adm">
         <div className="atabs">
-          {[['regs','수강신청 현황'],['survey','수요조사'],['classes','수업 관리'],['vod','녹화강의 관리'],['settings','설정']].map(([t,l])=>(
+          {[['regs','수강신청 현황'],['survey','수요조사'],['sim','개설 연습'],['classes','수업 관리'],['vod','녹화강의 관리'],['settings','설정']].map(([t,l])=>(
             <button key={t} className={`atab${adminTab===t?' on':''}`} onClick={()=>setAdminTab(t)}>{l}</button>
           ))}
         </div>
@@ -735,6 +756,49 @@ function App() {
                 </div>
               </div>
             ))}
+          </div>
+        )}
+        {adminTab==='sim'&&(
+          <div>
+            <div className="acard" style={{marginBottom:12}}>
+              <div style={{fontSize:13,fontWeight:800,color:'#111',marginBottom:6}}>🧪 개설 연습 (시뮬레이션)</div>
+              <p style={{fontSize:11.5,color:'#888',marginBottom:10,lineHeight:1.6}}>실제로 열지 않고 미리 돌려봐요. "이 요일에 이 대학을 열면 몇 명이 듣고, 누가 못 듣는지"를 계산해줘요.</p>
+              <div style={{display:'flex',gap:6}}>
+                <select className="ins" style={{flex:2}} value={simUniv} onChange={e=>setSimUniv(e.target.value)}>
+                  <option value="">대학 선택</option>
+                  {simUnivOptions.map(u=>(<option key={u} value={u}>{u}</option>))}
+                </select>
+                <select className="ins" style={{flex:1}} value={simDay} onChange={e=>setSimDay(parseInt(e.target.value))}>
+                  {SURVEY_DAYS.map(di=>(<option key={di} value={di}>{DAYS[di]}요일</option>))}
+                </select>
+                <button className="add-btn" style={{whiteSpace:'nowrap'}} onClick={simAdd}>추가</button>
+              </div>
+            </div>
+            {simPlan.length>0&&(
+              <div className="acard" style={{marginBottom:12}}>
+                <div style={{fontSize:13,fontWeight:800,color:'#111',marginBottom:8}}>📋 연습 개설 목록</div>
+                {simPlan.map((pl,i)=>(
+                  <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 10px',background:'#f3f0ea',borderRadius:8,marginBottom:6}}>
+                    <span style={{fontSize:12.5,fontWeight:700,color:'#111'}}>{pl.univ} · {DAYS[pl.day]}요일 20:00-22:00</span>
+                    <span style={{display:'inline-flex',alignItems:'center',gap:8}}><span style={{fontSize:12,fontWeight:800,color:'#00662b'}}>{simCount(pl.univ,pl.day)}명</span><button className="del-btn" onClick={()=>simRemove(i)}>✕</button></span>
+                  </div>))}
+                <div style={{display:'flex',gap:10,marginTop:8,fontSize:13,fontWeight:800}}>
+                  <span style={{color:'#00662b'}}>들을 수 있음 {simCoveredIds.size}명</span>
+                  <span style={{color:simUncovered.length?'#c62828':'#bbb'}}>못 들음 {simUncovered.length}명</span>
+                  <span style={{color:'#bbb',fontWeight:500}}>/ 전체 {surveys.filter(s2=>(s2.picks||[]).some(x=>x.u)).length}명</span>
+                </div>
+              </div>)}
+            {simPlan.length>0&&(
+              <div className="acard" style={{border:`1px solid ${simUncovered.length?'#FFCDD2':'#eee'}`}}>
+                <div style={{fontSize:13,fontWeight:800,color:simUncovered.length?'#c62828':'#00662b',marginBottom:8}}>⚠️ 이 계획에서 못 듣는 학생 {simUncovered.length}명</div>
+                {simUncovered.length===0?<div style={{fontSize:12,color:'#00662b',fontWeight:700}}>모두 들을 수 있어요 👍</div>:simUncovered.map(s2=>(
+                  <div key={s2.id} style={{padding:'8px 10px',background:'#FFF6F6',borderRadius:8,marginBottom:6}}>
+                    <div style={{fontSize:12.5,fontWeight:700,color:'#111'}}>{s2.name} <span style={{color:'#00662b',fontSize:11}}>{s2.phone}</span><button className="cp-btn" onClick={()=>copy(s2.phone)}>복사</button></div>
+                    <div style={{fontSize:11,color:'#888',marginTop:2}}>지망: {(s2.picks||[]).filter(x=>x.u).map(x=>x.u).join(', ')||'-'}</div>
+                    <div style={{fontSize:11,color:'#888'}}>가능 요일: {[...new Set((s2.times||[]).map(t=>DAYS[parseInt(String(t).split('-')[0])]))].join('·')||'-'}</div>
+                  </div>))}
+              </div>)}
+            {simPlan.length===0&&<div className="empty-st"><div style={{fontSize:36,marginBottom:10}}>🧪</div><p>위에서 대학·요일을 추가해<br/>조합을 시험해보세요</p></div>}
           </div>
         )}
         {adminTab==='classes'&&(
@@ -824,32 +888,37 @@ function App() {
 
               <div className="acard" style={{marginBottom:12}}>
                 <div style={{fontSize:13,fontWeight:800,color:'#111',marginBottom:4}}>🕒 가능 시간 히트맵</div>
-                <div style={{fontSize:11.5,color:'#888',marginBottom:10,lineHeight:1.6}}>20:00-22:00 해설강의 기준. 진할수록 많이 겹쳐요.<br/><b>칸을 누르면 그 시간으로 수업 추가</b>로 넘어가요. (토요일 휴무)</div>
-                <div style={{overflowX:'auto'}}>
-                  <table style={{borderCollapse:'collapse',fontSize:11,width:'100%'}}>
-                    <thead><tr><th style={{padding:3,width:74}}></th>{SURVEY_DAYS.map(di=>(<th key={di} style={{padding:'3px 2px',fontSize:12,fontWeight:800,color:di===0?'#e57373':'#666'}}>{DAYS[di]}</th>))}</tr></thead>
-                    <tbody>
-                      {SLOTS.filter(sl=>!sl.fixed).map(sl=>{
-                        const si=SLOTS.indexOf(sl);
-                        return (
-                        <tr key={sl.t}>
-                          <td style={{padding:'3px 6px 3px 0',whiteSpace:'nowrap'}}>
-                            <div style={{fontSize:10.5,color:'#888',fontWeight:700}}>{sl.t}</div>
-                            <div style={{fontSize:9.5,color:'#00662b'}}>{sl.tag}</div>
-                          </td>
-                          {SURVEY_DAYS.map(di=>{
-                            const n=svHeat[`${di}-${si}`]||0;
-                            const a=n===0?0:0.15+0.85*(n/svMax);
-                            return (<td key={di} onClick={()=>openClassFromSlot(di,si)} title={`${DAYS[di]} ${sl.t} · ${n}명`}
-                              style={{padding:0,cursor:'pointer'}}>
-                              <div style={{background:n?`rgba(0,102,43,${a})`:'#f3f0ea',color:a>0.55?'#fff':'#999',height:36,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,borderRadius:5,margin:1.5,fontSize:13}}>{n||''}</div>
-                            </td>);
-                          })}
-                        </tr>);
-                      })}
-                    </tbody>
-                  </table>
+                <div style={{fontSize:11.5,color:'#888',marginBottom:8,lineHeight:1.6}}>진할수록 많이 겹쳐요. <b>칸을 누르면 그 시간으로 수업 추가</b>. (토요일 휴무)</div>
+                <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:10}}>
+                  <button onClick={()=>setSvUniv('')} style={{padding:'5px 10px',borderRadius:14,fontFamily:'inherit',fontSize:11.5,fontWeight:700,cursor:'pointer',border:`1.5px solid ${svUniv===''?'#00662b':'#e6e1d8'}`,background:svUniv===''?'#00662b':'#fff',color:svUniv===''?'#fff':'#888'}}>전체</button>
+                  {svRanked.map(([u])=>(<button key={u} onClick={()=>setSvUniv(u)} style={{padding:'5px 10px',borderRadius:14,fontFamily:'inherit',fontSize:11.5,fontWeight:700,cursor:'pointer',border:`1.5px solid ${svUniv===u?'#00662b':'#e6e1d8'}`,background:svUniv===u?'#00662b':'#fff',color:svUniv===u?'#fff':'#888'}}>{u}</button>))}
                 </div>
+                {(()=>{
+                  const fSurveys=svUniv?surveys.filter(s2=>(s2.picks||[]).some(p=>canonUniv(p.u)===svUniv)):surveys;
+                  const fHeat={};fSurveys.forEach(s2=>(s2.times||[]).forEach(t=>{fHeat[t]=(fHeat[t]||0)+1;}));
+                  const fMax=Math.max(1,...Object.values(fHeat),1);
+                  return (<div>
+                  <div style={{fontSize:12,fontWeight:800,color:'#00662b',marginBottom:6}}>{svUniv?`${svUniv} 지망 ${fSurveys.length}명 기준`:`전체 ${fSurveys.length}명 기준`}</div>
+                  <div style={{overflowX:'auto'}}>
+                    <table style={{borderCollapse:'collapse',fontSize:11,width:'100%'}}>
+                      <thead><tr><th style={{padding:3,width:74}}></th>{SURVEY_DAYS.map(di=>(<th key={di} style={{padding:'3px 2px',fontSize:12,fontWeight:800,color:di===0?'#e57373':'#666'}}>{DAYS[di]}</th>))}</tr></thead>
+                      <tbody>
+                        {SLOTS.filter(sl=>!sl.fixed).map(sl=>{const si=SLOTS.indexOf(sl);return (
+                          <tr key={sl.t}>
+                            <td style={{padding:'3px 6px 3px 0',whiteSpace:'nowrap'}}>
+                              <div style={{fontSize:10.5,color:'#888',fontWeight:700}}>{sl.t}</div>
+                              <div style={{fontSize:9.5,color:'#00662b'}}>{sl.tag}</div>
+                            </td>
+                            {SURVEY_DAYS.map(di=>{const n=fHeat[`${di}-${si}`]||0;const av=n===0?0:0.15+0.85*(n/fMax);return (
+                              <td key={di} onClick={()=>openClassFromSlot(di,si)} title={`${DAYS[di]} ${sl.t} · ${n}명`} style={{padding:0,cursor:'pointer'}}>
+                                <div style={{background:n?`rgba(0,102,43,${av})`:'#f3f0ea',color:av>0.55?'#fff':'#999',height:36,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,borderRadius:5,margin:1.5,fontSize:13}}>{n||''}</div>
+                              </td>);})}
+                          </tr>);})}
+                      </tbody>
+                    </table>
+                  </div>
+                  </div>);
+                })()}
               </div>
 
               <div className="acard" style={{marginBottom:12}}>
@@ -858,6 +927,19 @@ function App() {
                   <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
                     {svYaksulRanked.map(([u,c])=>(<span key={u} style={{fontSize:12,fontWeight:700,color:'#004d20',background:'#E8F5EE',border:'1px solid #00662b',borderRadius:14,padding:'4px 10px'}}>{u} {c}</span>))}
                   </div>}
+              </div>
+
+              <div className="acard" style={{marginBottom:12,border:`1px solid ${uncovered.length?'#FFCDD2':'#eee'}`}}>
+                <div style={{fontSize:13,fontWeight:800,color:uncovered.length?'#c62828':'#111',marginBottom:6}}>⚠️ 아직 배정 안 된 학생 {uncovered.length}명</div>
+                <div style={{fontSize:11.5,color:'#888',marginBottom:8,lineHeight:1.6}}>지망 대학이 자기 가능 요일에 아직 안 열린 학생들이에요. (수업을 연 뒤에 확인하세요. 수업을 더 열거나 개별 안내가 필요해요.)</div>
+                {cls.length===0?<div style={{fontSize:12,color:'#bbb'}}>아직 연 수업이 없어요 — 수업을 열면 여기서 소외 학생을 잡아줘요.</div>
+                :uncovered.length===0?<div style={{fontSize:12,color:'#00662b',fontWeight:700}}>모든 학생이 배정됐어요 👍</div>
+                :uncovered.map(s2=>(
+                  <div key={s2.id} style={{padding:'8px 10px',background:'#FFF6F6',borderRadius:8,marginBottom:6}}>
+                    <div style={{fontSize:12.5,fontWeight:700,color:'#111'}}>{s2.name} <span style={{color:'#00662b',fontSize:11}}>{s2.phone}</span><button className="cp-btn" onClick={()=>copy(s2.phone)}>복사</button></div>
+                    <div style={{fontSize:11,color:'#888',marginTop:2}}>지망: {(s2.picks||[]).filter(x=>x.u).map(x=>x.u).join(', ')||'-'}</div>
+                    <div style={{fontSize:11,color:'#888'}}>가능 요일: {[...new Set((s2.times||[]).map(t=>DAYS[parseInt(String(t).split('-')[0])]))].join('·')||'-'}</div>
+                  </div>))}
               </div>
 
               <div style={{fontSize:12,fontWeight:800,color:'#111',margin:'14px 0 8px'}}>응답자 {surveys.length}명</div>
