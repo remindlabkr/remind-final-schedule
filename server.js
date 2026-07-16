@@ -243,6 +243,28 @@ app.get('/api/notify-test', async (req, res) => {
   }
 });
 
+// 3) 결제선생 테스트 발송:  https://내서버/api/payssam-test?phone=01012345678
+app.get('/api/payssam-test', async (req, res) => {
+  const phone = onlyNum(req.query.phone);
+  if (!phone) return res.status(400).json({ ok: false, message: '?phone=01012345678 형식으로 번호를 붙여주세요' });
+  if (!PAYSSAM_API_KEY) return res.json({ ok: false, reason: '결제선생 키 미설정(PAYSSAM_API_KEY)' });
+  const billId = 'TEST' + Date.now();
+  const price = '1000';
+  const hash = makeHash({ billId, phone, price });
+  const callbackUrl = PAYSSAM_CALLBACK_URL || `${req.protocol}://${req.get('host')}/api/payssam/callback`;
+  try {
+    const r = await callPayssam('/bill', {
+      apiKey: PAYSSAM_API_KEY, member: PAYSSAM_MEMBER || PAYSSAM_MERCHANT, merchant: PAYSSAM_MERCHANT,
+      bill: { billId, sendType: (PAYSSAM_SEND_TYPE || 'TALK'), billIssuer: PAYSSAM_BILL_ISSUER, productName: '테스트 청구서', price, memberName: '테스트', phone, hash, callbackUrl },
+    });
+    res.json({
+      ok: r.httpOk, 서버: PAYSSAM_BASE, 발송타입: PAYSSAM_SEND_TYPE,
+      member: PAYSSAM_MEMBER || PAYSSAM_MERCHANT, merchant: PAYSSAM_MERCHANT,
+      httpStatus: r.status, 결제선생응답: r.data,
+    });
+  } catch (e) { res.json({ ok: false, error: String(e?.message || e) }); }
+});
+
 // ================== 결제선생 ==================
 const approvals = new Map();
 function makeHash({ billId, phone, price }) {
