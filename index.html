@@ -740,6 +740,7 @@ function App() {
                       {r.cardPhone&&<span style={{fontSize:11,color:'#888'}}>결제자: {r.cardPhone}<button className="cp-btn" onClick={()=>copy(r.cardPhone)}>복사</button></span>}
                       <span style={{fontSize:13,fontWeight:700,color:'#00662b'}}>{r.totalWon/10000}만원</span>
                       {r.payMethod==='카드'&&r.billStatus&&<span className="rtag" style={{background:'#EEF2FF',color:'#3730A3',borderColor:'#C7D2FE'}}>청구서 {billLabel(r.billStatus)}</span>}
+                      {r.billId&&<span style={{fontSize:10.5,color:'#999',cursor:'pointer'}} onClick={()=>copy(r.billId)} title="검수용 청구서번호 복사">🧾 {r.billId}</span>}
                       {r.payMethod==='카드'&&r.billId&&payssamUrl&&(<span style={{display:'inline-flex',gap:4}}>
                         <button className="cp-btn" onClick={()=>refreshBill(r)}>결제확인</button>
                         <button className="cp-btn" onClick={()=>resendBill(r)}>재발송</button>
