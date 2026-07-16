@@ -61,6 +61,8 @@ function newBillId(){
 function billLabel(st){
   return ({sending:'발송중',sent:'발송됨',failed:'발송실패',manual:'수동발송',paid:'결제완료',destroyed:'파기됨',cancelled:'결제취소'})[st]||st;
 }
+// 변경 후 정산 대기 상태 라벨 (정산 끝나면 자동으로 사라지고 '수납'으로 바뀜)
+const SETTLE_LABEL={reissue:'재결제 필요',extra:'차액 결제 필요',refund_reissue:'환불 후 재청구',cash_extra:'추가 입금 필요',cash_refund:'환불 필요'};
 // 신청확정 알림톡 발송 요청 (서버 경유). 실패해도 신청 자체는 정상 처리됨.
 async function notifyStudent(entry){
   try{
@@ -324,10 +326,21 @@ function App() {
     let stop=false;
     async function tick(){
       const purl=purlRef.current; if(!purl)return;
-      const pend=(regsRef.current||[]).filter(r=>r.billId&&!r.paid&&r.billStatus!=='cancelled'&&r.billStatus!=='destroyed');
+      const pend=(regsRef.current||[]).filter(r=>{
+        if(r.billStatus==='cancelled'||r.billStatus==='destroyed')return false;
+        if(r.settle==='cash_extra'||r.settle==='cash_refund')return false; // 현금은 자동감지 대상 아님(수동 처리)
+        const watch=r.settle==='extra'?r.extraBillId:r.billId;
+        if(!watch)return false;
+        if(!r.settle&&r.paid)return false; // 정산 없고 이미 수납이면 스킵
+        return true;
+      });
       for(const r of pend){ if(stop)break;
-        try{const x=await payssamCall(purl,'status',{billId:r.billId});
-          if(x.ok&&x.apprState==='F')await updateRegById(r.id,{billStatus:'paid',paid:true});
+        const watch=r.settle==='extra'?r.extraBillId:r.billId;
+        try{const x=await payssamCall(purl,'status',{billId:watch});
+          if(x.ok&&x.apprState==='F'){
+            await updateRegById(r.id,{billStatus:'paid',paid:true,settle:null,notifyChangePending:false});
+            if(r.notifyChangePending)notifyChange({...r,settle:null}); // 결제 완료된 순간 변경완료 톡 발송
+          }
           else if(x.ok&&(x.apprState==='C'||x.apprState==='D'))await updateRegById(r.id,{billStatus:x.apprState==='C'?'cancelled':'destroyed'});
         }catch(e){}
       }
@@ -503,6 +516,15 @@ function App() {
   async function updateRegById(id,patch){
     setRegs(prev=>{const nx=prev.map(r=>r.id===id?{...r,...patch}:r);ss(regKey(yr,mo),nx);return nx;});
   }
+  // 변경 후 정산(재결제/차액/입금/환불) 완료 처리 → '수납'으로 바꾸고 그때 변경완료 톡 발송
+  async function resolveSettle(r){
+    const patch={settle:null,notifyChangePending:false};
+    if(r.settle!=='cash_refund'){ patch.paid=true; if(r.payMethod==='카드')patch.billStatus='paid'; }
+    await updateRegById(r.id,patch);
+    if(r.notifyChangePending){ notifyChange({...r,...patch}); setToast('정산 완료 — 변경완료 톡 발송!'); }
+    else setToast('정산 완료 처리됨');
+    setTimeout(()=>setToast(''),2200);
+  }
   function openChange(r){
     setChgReg(r);setChgMsg('');
     setChgSel(new Set((r.classes||[]).map(c=>c.id)));
@@ -539,41 +561,45 @@ function App() {
     const isCard=r.payMethod==='카드';
     const wasPaid=!!r.paid || r.billStatus==='paid';
     let note='';
+    let notifyNow=false;  // 결제/정산이 이미 끝난 경우에만 즉시 변경완료 톡 발송
     try{
       if(isCard && payssamUrl){
         const productName=[...newCls.map(c=>c.name),...newVODArr.map(v=>v.vod.name)].join(', ').slice(0,90)||'리마인드 논술 수강료';
-        if(diff===0){ note='금액 변동 없음'; }
+        if(diff===0){ patch.settle=null; notifyNow=true; note='금액 변동 없음 (바로 변경완료 안내 발송)'; }
         else if(!wasPaid){
-          // 미결제 → 기존 청구서 파기 후 새 금액으로 재발송
+          // 미결제 → 기존 청구서 파기 후 새 금액으로 재발송 → 학생 재결제 대기
           if(r.billId){try{await payssamCall(payssamUrl,'destroy',{billId:r.billId,price:String(prevWon)});}catch(e){}}
           const nb=newBillId();
           const x=await payssamCall(payssamUrl,'send',{billId:nb,memberName:r.studentName,phone:r.cardPhone||r.phone,price:String(newWon),productName,memberCode:r.phone});
           patch.billId=nb; patch.billStatus=(x.ok&&(x.code==='0000'||x.shortUrl))?'sent':'failed'; patch.shortUrl=x.shortUrl||'';
-          note=`새 청구서 발송(${(newWon/10000)}만원)`;
+          patch.paid=false; patch.settle='reissue'; patch.notifyChangePending=true;
+          note=`새 청구서 ${(newWon/10000)}만원 발송 → 학생 재결제 후 자동으로 '수납'+변경완료 톡`;
         } else if(diff>0){
-          // 결제완료 + 증액 → 차액만 추가 청구
+          // 결제완료 + 증액 → 차액만 추가 청구 → 차액 결제 대기
           const nb=newBillId();
           const x=await payssamCall(payssamUrl,'send',{billId:nb,memberName:r.studentName,phone:r.cardPhone||r.phone,price:String(diff),productName:`[차액] ${productName}`,memberCode:r.phone});
-          patch.extraBillId=nb; note=`차액 ${(diff/10000)}만원 추가 청구${x.ok?'':' (실패)'}`;
+          patch.extraBillId=nb; patch.paid=false; patch.settle='extra'; patch.notifyChangePending=true;
+          note=`차액 ${(diff/10000)}만원 추가 청구${x.ok?'':' (발송 실패)'} → 차액 결제 후 자동으로 '수납'+변경완료 톡`;
         } else {
-          // 결제완료 + 감액 → 전체 취소(환불) 후 새 금액 재청구
+          // 결제완료 + 감액 → 전체 취소(환불) 후 새 금액 재청구 → 재결제 대기
           try{await payssamCall(payssamUrl,'cancel',{billId:r.billId,price:String(prevWon),cancelReason:'수강변경'});}catch(e){}
           const nb=newBillId();
           const x=await payssamCall(payssamUrl,'send',{billId:nb,memberName:r.studentName,phone:r.cardPhone||r.phone,price:String(newWon),productName,memberCode:r.phone});
-          patch.billId=nb; patch.billStatus=(x.ok&&(x.code==='0000'||x.shortUrl))?'sent':'failed'; patch.shortUrl=x.shortUrl||''; patch.paid=false;
-          note=`기존 결제 취소(환불) 후 ${(newWon/10000)}만원 재청구`;
+          patch.billId=nb; patch.billStatus=(x.ok&&(x.code==='0000'||x.shortUrl))?'sent':'failed'; patch.shortUrl=x.shortUrl||'';
+          patch.paid=false; patch.settle='refund_reissue'; patch.notifyChangePending=true;
+          note=`기존 결제 취소(환불) 후 ${(newWon/10000)}만원 재청구 → 재결제 후 자동으로 '수납'+변경완료 톡`;
         }
       } else {
         // 현금
-        if(diff>0) note=`💰 추가 입금 필요: ${(diff/10000)}만원 (계좌 안내)`;
-        else if(diff<0) note=`💸 환불 필요: ${(-diff/10000)}만원 (환불계좌 확인)`;
-        else note='금액 변동 없음';
+        if(diff===0){ patch.settle=null; notifyNow=true; note='금액 변동 없음 (바로 변경완료 안내 발송)'; }
+        else if(diff>0){ patch.paid=false; patch.settle='cash_extra'; patch.notifyChangePending=true; note=`💰 추가 입금 필요: ${(diff/10000)}만원 — 입금 확인 후 '추가 입금 필요' 뱃지를 누르면 변경완료 톡 발송`; }
+        else { patch.settle='cash_refund'; patch.notifyChangePending=true; note=`💸 환불 필요: ${(-diff/10000)}만원 — 환불 후 '환불 필요' 뱃지를 누르면 변경완료 톡 발송`; }
       }
       await updateRegById(r.id,patch);
-      notifyChange({...r,...patch});
-      setChgMsg('✅ 변경 완료! '+note);
-      setToast('변경 완료');setTimeout(()=>setToast(''),2000);
-      setTimeout(()=>setChgReg(null),1800);
+      if(notifyNow) notifyChange({...r,...patch});
+      setChgMsg('✅ 변경 저장! '+note);
+      setToast('변경 저장됨');setTimeout(()=>setToast(''),2000);
+      setTimeout(()=>setChgReg(null),2400);
     }catch(e){ setChgMsg('오류: '+(e.message||e)); }
     setChgBusy(false);
   }
@@ -763,7 +789,9 @@ function App() {
                   <div style={{flex:1}}>
                     <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:3}}>
                       <div style={{fontSize:14,fontWeight:700,color:'#111'}}>{r.studentName}</div>
-                      <button onClick={()=>togglePaid(r.id)} className="paid-toggle" style={{background:r.paid?'#E8F5EE':'#FFF3F3',color:r.paid?'#004d20':'#e53935',borderColor:r.paid?'#00662b':'#FFCDD2'}}>{r.paid?'✓ 수납':'미수납'}</button>
+                      {r.settle
+                        ? <button onClick={()=>resolveSettle(r)} className="paid-toggle" style={{background:'#FFF3E0',color:'#E65100',borderColor:'#FFCC80'}} title="결제/입금/환불이 끝나면 눌러서 완료 처리 (그때 변경완료 톡이 나가요)">⏳ {SETTLE_LABEL[r.settle]}</button>
+                        : <button onClick={()=>togglePaid(r.id)} className="paid-toggle" style={{background:r.paid?'#E8F5EE':'#FFF3F3',color:r.paid?'#004d20':'#e53935',borderColor:r.paid?'#00662b':'#FFCDD2'}}>{r.paid?'✓ 수납':'미수납'}</button>}
                     </div>
                     <div style={{fontSize:13,color:'#00662b',fontWeight:700,marginBottom:3}}>📞 {r.phone}<button className="cp-btn" onClick={()=>copy(r.phone)}>복사</button></div>
                     {r.classes&&r.classes.length>0&&<div style={{fontSize:11.5,color:'#888',marginBottom:4}}>🎥 {r.classes.map(c=>clsLabel(c)).join(' · ')}</div>}
