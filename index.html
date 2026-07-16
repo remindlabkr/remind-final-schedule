@@ -578,12 +578,24 @@ function App() {
     setChgBusy(false);
   }
   async function resendBill(r){
-    if(!payssamUrl||!r.billId)return;
-    setToast('재발송 중…');
-    try{const x=await payssamCall(payssamUrl,'resend',{billId:r.billId});
-      setToast(x.ok&&x.code==='0000'?'재발송 완료!':(x.message||x.msg||'재발송 실패'));}
-    catch(e){setToast('재발송 실패');}
-    setTimeout(()=>setToast(''),1800);
+    if(!payssamUrl)return;
+    // 발송 실패했거나 청구서가 없던 건 → 새 청구서를 새로 발송 / 정상 발송된 건 → 재발송
+    const needNew = !r.billId || r.billStatus==='failed' || r.billStatus==='manual';
+    setToast(needNew?'새 청구서 발송 중…':'재발송 중…');
+    try{
+      if(needNew){
+        const nb=newBillId();
+        const productName=[...(r.classes||[]).map(c=>c.name),...(r.vodItems||[]).map(v=>v.name)].join(', ').slice(0,90)||'리마인드 논술 수강료';
+        const x=await payssamCall(payssamUrl,'send',{billId:nb,memberName:r.studentName,phone:r.cardPhone||r.phone,price:String(r.totalWon),productName,memberCode:r.phone});
+        if(x.ok&&(x.code==='0000'||x.shortUrl)){await updateRegById(r.id,{billId:nb,billStatus:'sent',shortUrl:x.shortUrl||''});setToast('새 청구서 발송 완료!');}
+        else{await updateRegById(r.id,{billStatus:'failed'});setToast(x.message||x.msg||'발송 실패');}
+      }else{
+        const x=await payssamCall(payssamUrl,'resend',{billId:r.billId});
+        setToast(x.ok&&x.code==='0000'?'재발송 완료!':(x.message||x.msg||'재발송 실패'));
+      }
+    }
+    catch(e){setToast('발송 실패');}
+    setTimeout(()=>setToast(''),2000);
   }
   async function destroyBill(r){
     if(!payssamUrl||!r.billId)return;
