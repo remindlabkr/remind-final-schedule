@@ -206,6 +206,43 @@ async function cronHandler(req, res) {
 app.get('/api/cron', cronHandler);
 app.post('/api/cron', cronHandler);
 
+// ================== 알림톡 점검용 ==================
+// 1) 상태 확인:  https://내서버/api/health   (비밀값은 안 보이고 O/X만 표시)
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    time: new Date().toISOString(),
+    storage: useRedis ? 'Upstash(영구저장)' : '임시메모리(재시작시 초기화)',
+    alimtalk: {
+      준비완료: solapiReady,
+      solapi패키지: !!SolapiMessageService,
+      API_KEY있음: !!SOLAPI_API_KEY,
+      API_SECRET있음: !!SOLAPI_API_SECRET,
+      PFID있음: !!SOLAPI_PFID,
+      발신번호있음: !!SOLAPI_SENDER,
+      템플릿_신청완료: SOLAPI_TPL_CONFIRM ? ('...' + SOLAPI_TPL_CONFIRM.slice(-6)) : '없음',
+      템플릿_변경완료: SOLAPI_TPL_CHANGE ? ('...' + SOLAPI_TPL_CHANGE.slice(-6)) : '없음',
+      템플릿_수업전: SOLAPI_TPL_REMIND ? ('...' + SOLAPI_TPL_REMIND.slice(-6)) : '없음',
+    },
+  });
+});
+// 2) 테스트 발송:  https://내서버/api/notify-test?phone=01012345678
+app.get('/api/notify-test', async (req, res) => {
+  const phone = onlyNum(req.query.phone);
+  if (!phone) return res.status(400).json({ ok: false, message: '?phone=01012345678 형식으로 번호를 붙여주세요' });
+  if (!solapiReady) return res.json({ ok: false, ready: false, reason: '솔라피 미설정 — /api/health 확인 후 환경변수 채우세요' });
+  try {
+    const r = await sendAlimtalk({
+      to: phone, templateId: SOLAPI_TPL_CONFIRM,
+      variables: { '#{이름}': '테스트', '#{월}': String(new Date().getMonth() + 1), '#{신청내역}': '· 테스트 수업' },
+      fallbackText: '[리마인드 논술] 테스트 알림톡입니다.',
+    });
+    res.json({ ok: true, result: r });
+  } catch (e) {
+    res.json({ ok: false, error: String(e?.message || e), detail: e?.failedMessageList || e?.data || null });
+  }
+});
+
 // ================== 결제선생 ==================
 const approvals = new Map();
 function makeHash({ billId, phone, price }) {
