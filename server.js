@@ -248,7 +248,17 @@ app.post('/api/payssam', async (req, res) => {
     if (action === 'status') {
       const { billId } = req.body;
       const a = approvals.get(billId);
-      return res.json(a ? { code: '0000', ...a } : { code: '0000', apprState: null, billId });
+      // 메모리에 확정 상태가 있으면 그대로 반환
+      if (a && a.apprState) return res.json({ code: '0000', ...a });
+      // 없으면(서버 재시작·슬립 등으로 메모리 소실) 결제선생에 실시간 조회 → 재시작에도 안전
+      try {
+        const r = await callPayssam('/bill/read', { apiKey: PAYSSAM_API_KEY, member: PAYSSAM_MEMBER || PAYSSAM_MERCHANT, merchant: PAYSSAM_MERCHANT, bill: { billId } });
+        const d = r.data?.data || {};
+        if (d.apprState) approvals.set(billId, { apprState: d.apprState, apprPrice: d.apprPrice, apprDt: d.apprDt, billId });
+        return res.json({ code: '0000', apprState: d.apprState || null, apprPrice: d.apprPrice, apprDt: d.apprDt, billId });
+      } catch (e) {
+        return res.json({ code: '0000', apprState: null, billId });
+      }
     }
     // --- 승인취소 (결제완료 청구서를 취소) ---
     if (action === 'cancel') {
