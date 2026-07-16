@@ -259,8 +259,8 @@ function App() {
   const [pw,setPw]=useState('910124');
   const [wh,setWh]=useState('');
   const [loading,setLoading]=useState(true);
-  const [view,setView]=useState('student');
-  const [adminTab,setAdminTab]=useState('regs');
+  const [view,setView]=useState(()=>{try{const v=localStorage.getItem('r15-view');return (v==='admin'||v==='survey')?v:'student';}catch(e){return 'student';}});
+  const [adminTab,setAdminTab]=useState(()=>{try{return localStorage.getItem('r15-tab')||'regs';}catch(e){return 'regs';}});
   const [pwInput,setPwInput]=useState('');
   const [pwErr,setPwErr]=useState(false);
   const [selected,setSelected]=useState(new Set());
@@ -312,6 +312,31 @@ function App() {
   const [svDone,setSvDone]=useState(false);
 
   useEffect(()=>{load();},[yr,mo]);
+  // 로그인/탭 상태 유지 (새로고침해도 관리자 화면 그대로)
+  useEffect(()=>{try{localStorage.setItem('r15-view',view);}catch(e){}},[view]);
+  useEffect(()=>{try{localStorage.setItem('r15-tab',adminTab);}catch(e){}},[adminTab]);
+
+  // 결제완료 자동 감지 (결제확인 안 눌러도 15초마다 수납 자동 반영)
+  const regsRef=React.useRef(regs); useEffect(()=>{regsRef.current=regs;},[regs]);
+  const purlRef=React.useRef(payssamUrl); useEffect(()=>{purlRef.current=payssamUrl;},[payssamUrl]);
+  useEffect(()=>{
+    if(view!=='admin')return;
+    let stop=false;
+    async function tick(){
+      const purl=purlRef.current; if(!purl)return;
+      const pend=(regsRef.current||[]).filter(r=>r.billId&&!r.paid&&r.billStatus!=='cancelled'&&r.billStatus!=='destroyed');
+      for(const r of pend){ if(stop)break;
+        try{const x=await payssamCall(purl,'status',{billId:r.billId});
+          if(x.ok&&x.apprState==='F')await updateRegById(r.id,{billStatus:'paid',paid:true});
+          else if(x.ok&&(x.apprState==='C'||x.apprState==='D'))await updateRegById(r.id,{billStatus:x.apprState==='C'?'cancelled':'destroyed'});
+        }catch(e){}
+      }
+    }
+    tick();
+    const iv=setInterval(tick,15000);
+    return ()=>{stop=true;clearInterval(iv);};
+  },[view,yr,mo]);
+
   useEffect(()=>{
     function applyHash(){
       try{
@@ -918,11 +943,18 @@ function App() {
             {simPlan.length>0&&(
               <div className="acard" style={{marginBottom:12}}>
                 <div style={{fontSize:13,fontWeight:800,color:'#111',marginBottom:8}}>📋 연습 개설 목록</div>
-                {simPlan.map((pl,i)=>(
-                  <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 10px',background:'#f3f0ea',borderRadius:8,marginBottom:6}}>
-                    <span style={{fontSize:12.5,fontWeight:700,color:'#111'}}>{pl.univ} · {DAYS[pl.day]}요일 20:00-22:00</span>
-                    <span style={{display:'inline-flex',alignItems:'center',gap:8}}><span style={{fontSize:12,fontWeight:800,color:'#00662b'}}>{simCount(pl.univ,pl.day)}명</span><button className="del-btn" onClick={()=>simRemove(i)}>✕</button></span>
-                  </div>))}
+                {simPlan.map((pl,i)=>{
+                  const want=surveys.filter(s2=>(s2.picks||[]).map(x=>baseSchool(x.u)).includes(pl.univ));
+                  const miss=want.filter(s2=>!new Set((s2.times||[]).map(t=>parseInt(String(t).split('-')[0]))).has(pl.day));
+                  return(
+                  <div key={i} style={{padding:'8px 10px',background:'#f3f0ea',borderRadius:8,marginBottom:6}}>
+                    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                      <span style={{fontSize:12.5,fontWeight:700,color:'#111'}}>{pl.univ} · {DAYS[pl.day]}요일 20:00-22:00</span>
+                      <span style={{display:'inline-flex',alignItems:'center',gap:8}}><span style={{fontSize:12,fontWeight:800,color:'#00662b'}}>{want.length-miss.length}명 들음</span><button className="del-btn" onClick={()=>simRemove(i)}>✕</button></span>
+                    </div>
+                    {miss.length>0&&<div style={{fontSize:11,color:'#E65100',marginTop:4,lineHeight:1.5}}>⏰ {pl.univ} 지망인데 {DAYS[pl.day]}요일 안 되는 {miss.length}명: {miss.map(m=>m.name).join(', ')}</div>}
+                    {want.length===0&&<div style={{fontSize:11,color:'#bbb',marginTop:4}}>이 대학 지망한 학생이 아직 없어요</div>}
+                  </div>);})}
                 <div style={{display:'flex',gap:10,marginTop:8,fontSize:13,fontWeight:800}}>
                   <span style={{color:'#00662b'}}>들을 수 있음 {simCoveredIds.size}명</span>
                   <span style={{color:simUncovered.length?'#c62828':'#bbb'}}>못 들음 {simUncovered.length}명</span>
@@ -931,13 +963,20 @@ function App() {
               </div>)}
             {simPlan.length>0&&(
               <div className="acard" style={{border:`1px solid ${simUncovered.length?'#FFCDD2':'#eee'}`}}>
-                <div style={{fontSize:13,fontWeight:800,color:simUncovered.length?'#c62828':'#00662b',marginBottom:8}}>⚠️ 이 계획에서 못 듣는 학생 {simUncovered.length}명</div>
-                {simUncovered.length===0?<div style={{fontSize:12,color:'#00662b',fontWeight:700}}>모두 들을 수 있어요 👍</div>:simUncovered.map(s2=>(
+                <div style={{fontSize:13,fontWeight:800,color:simUncovered.length?'#c62828':'#00662b',marginBottom:4}}>⚠️ 최종: 이 계획 전체로 아무 수업도 못 듣는 학생 {simUncovered.length}명</div>
+                <div style={{fontSize:11,color:'#888',marginBottom:8,lineHeight:1.6}}>계획한 수업들 어디에도 못 들어가는 학생이에요. (⏰ 지망대학은 열렸지만 가능요일 안 맞음 · 📭 지망대학을 아직 계획에 안 넣음)</div>
+                {simUncovered.length===0?<div style={{fontSize:12,color:'#00662b',fontWeight:700}}>모두 들을 수 있어요 👍</div>:simUncovered.map(s2=>{
+                  const plannedU=new Set(simPlan.map(pl=>pl.univ));
+                  const mine=(s2.picks||[]).map(x=>baseSchool(x.u)).filter(Boolean);
+                  const dayMiss=mine.some(u=>plannedU.has(u)); // 지망대학은 계획에 있는데 요일이 안 맞음
+                  return(
                   <div key={s2.id} style={{padding:'8px 10px',background:'#FFF6F6',borderRadius:8,marginBottom:6}}>
-                    <div style={{fontSize:12.5,fontWeight:700,color:'#111'}}>{s2.name} <span style={{color:'#00662b',fontSize:11}}>{s2.phone}</span><button className="cp-btn" onClick={()=>copy(s2.phone)}>복사</button></div>
+                    <div style={{fontSize:12.5,fontWeight:700,color:'#111'}}>{s2.name} <span style={{color:'#00662b',fontSize:11}}>{s2.phone}</span><button className="cp-btn" onClick={()=>copy(s2.phone)}>복사</button>
+                      <span style={{fontSize:10,fontWeight:700,marginLeft:6,padding:'2px 7px',borderRadius:10,background:dayMiss?'#FFE0B2':'#E0E0E0',color:dayMiss?'#E65100':'#666'}}>{dayMiss?'⏰ 요일 안 맞음':'📭 미개설'}</span>
+                    </div>
                     <div style={{fontSize:11,color:'#888',marginTop:2}}>지망: {(s2.picks||[]).filter(x=>x.u).map(x=>x.u).join(', ')||'-'}</div>
                     <div style={{fontSize:11,color:'#888'}}>가능 요일: {[...new Set((s2.times||[]).map(t=>DAYS[parseInt(String(t).split('-')[0])]))].join('·')||'-'}</div>
-                  </div>))}
+                  </div>);})}
               </div>)}
             {simPlan.length===0&&<div className="empty-st"><div style={{fontSize:36,marginBottom:10}}>🧪</div><p>위에서 대학·요일을 추가해<br/>조합을 시험해보세요</p></div>}
           </div>
