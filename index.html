@@ -26,6 +26,7 @@ function clsKey(y,m){ return `r15-cls-${y}-${String(m+1).padStart(2,'0')}`; }
 function regKey(y,m){ return `r15-reg-${y}-${String(m+1).padStart(2,'0')}`; }
 function vodKey(y,m){ return `r15-vod-${y}-${String(m+1).padStart(2,'0')}`; }
 function svKey(y,m){ return `r15-sv-${y}-${String(m+1).padStart(2,'0')}`; }
+function simKey(y,m){ return `r15-sim-${y}-${String(m+1).padStart(2,'0')}`; }
 
 // ===== 사전 수요조사 =====
 const UNIV_GROUPS=[
@@ -410,6 +411,7 @@ function App() {
     const vd=await sg(vodKey(yr,mo));
     if(vd){setVodList(vd);}else if(yr===2026&&mo===7){setVodList(SAMPLE_VOD);await ss(vodKey(yr,mo),SAMPLE_VOD);}else{setVodList([]);}
     const svd=await sg(svKey(yr,mo));setSurveys(svd||[]);
+    const simd=await sg(simKey(yr,mo));setSimPlan(Array.isArray(simd)?simd:[]);
     const sm=await sg('r15-site-mode');if(sm==='signup'||sm==='survey')setSiteMode(sm);
     const sp=await sg('r15-admin-pw');if(typeof sp==='string'&&sp)setPw(sp);
     const sw=await sg('r15-webhook');if(typeof sw==='string')setWh(sw);
@@ -740,8 +742,8 @@ function App() {
   surveys.forEach(s2=>(s2.yaksulSchools||[]).forEach(u=>{svYaksulSchools[u]=(svYaksulSchools[u]||0)+1;}));
   const svYaksulRanked=Object.entries(svYaksulSchools).sort((a,b)=>b[1]-a[1]);
   const simUnivOptions=[...new Set(surveys.flatMap(s2=>(s2.picks||[]).map(x=>baseSchool(x.u)).filter(Boolean)))];
-  function simAdd(){ if(!simUniv)return; const key=simUniv+'-'+simDay; if(simPlan.some(x=>x.univ+'-'+x.day===key))return; setSimPlan(prev=>[...prev,{univ:simUniv,day:simDay}]); }
-  function simRemove(i){ setSimPlan(prev=>prev.filter((_,idx)=>idx!==i)); }
+  function simAdd(){ if(!simUniv)return; const key=simUniv+'-'+simDay; if(simPlan.some(x=>x.univ+'-'+x.day===key))return; setSimPlan(prev=>{const next=[...prev,{univ:simUniv,day:simDay}]; ss(simKey(yr,mo),next); return next;}); }
+  function simRemove(i){ setSimPlan(prev=>{const next=prev.filter((_,idx)=>idx!==i); ss(simKey(yr,mo),next); return next;}); }
   function simCount(univ,day){ return surveys.filter(s2=>{const picks=(s2.picks||[]).map(x=>baseSchool(x.u));const days=new Set((s2.times||[]).map(t=>parseInt(String(t).split('-')[0])));return picks.includes(univ)&&days.has(day);}).length; }
   const simCoveredIds=new Set();
   surveys.forEach(s2=>{const picks=(s2.picks||[]).map(x=>baseSchool(x.u)).filter(Boolean);const days=new Set((s2.times||[]).map(t=>parseInt(String(t).split('-')[0])));if(simPlan.some(pl=>picks.includes(pl.univ)&&days.has(pl.day)))simCoveredIds.add(s2.id);});
