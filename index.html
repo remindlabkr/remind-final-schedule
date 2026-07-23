@@ -948,9 +948,17 @@ function App() {
 
               <div className="acard" style={{marginBottom:12}}>
                 <div style={{fontSize:13,fontWeight:800,color:'#111',marginBottom:8}}>📝 약술형 논술 관심 <span style={{fontSize:12,fontWeight:700,color:'#00662b'}}>{svYaksulN}명</span> <span style={{fontSize:11,fontWeight:500,color:'#bbb'}}>/ 전체 {surveys.length}명</span></div>
-                {svYaksulRanked.length===0?<div style={{fontSize:12,color:'#bbb'}}>아직 관심 응답 없음</div>:
-                  <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-                    {svYaksulRanked.map(([u,c])=>(<span key={u} style={{fontSize:12,fontWeight:700,color:'#004d20',background:'#E8F5EE',border:'1px solid #00662b',borderRadius:14,padding:'4px 10px'}}>{u} {c}</span>))}
+                {svYaksulN===0?<div style={{fontSize:12,color:'#bbb'}}>아직 관심 응답 없음</div>:
+                  <div>
+                    {surveys.filter(s2=>s2.yaksul==='O').map(s2=>(
+                      <div key={s2.id} style={{padding:'8px 10px',background:'#E8F5EE',borderRadius:8,marginBottom:6}}>
+                        <div style={{fontSize:12.5,fontWeight:700,color:'#111'}}>{s2.name} <span style={{color:'#00662b',fontSize:11}}>{s2.phone}</span><button className="cp-btn" onClick={()=>copy(s2.phone)}>복사</button></div>
+                        <div style={{fontSize:11,color:'#888',marginTop:2}}>관심 학교: {(s2.yaksulSchools||[]).join(', ')||'학교 미선택 (개별 확인 필요)'}</div>
+                      </div>))}
+                    {svYaksulRanked.length>0&&
+                      <div style={{display:'flex',flexWrap:'wrap',gap:6,marginTop:6}}>
+                        {svYaksulRanked.map(([u,c])=>(<span key={u} style={{fontSize:12,fontWeight:700,color:'#004d20',background:'#E8F5EE',border:'1px solid #00662b',borderRadius:14,padding:'4px 10px'}}>{u} {c}</span>))}
+                      </div>}
                   </div>}
               </div>
 
