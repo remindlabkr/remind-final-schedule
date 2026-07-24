@@ -89,6 +89,19 @@ app.post('/api/kv/:key', async (req, res) => {
   try { await kvSet(req.params.key, req.body?.value ?? ''); res.json({ ok: true }); }
   catch (e) { console.error('kv set', e); res.status(500).json({ ok: false }); }
 });
+// 원자적 append: 새 항목 1개만 받아 서버에서 '최신' 배열을 읽고 이어붙여 저장.
+// (클라이언트가 오래된 명단 스냅샷을 통째로 덮어쓰던 동시제출 유실 버그 방지. 읽기~쓰기 창이 ms 단위로 축소)
+app.post('/api/kv-append/:key', async (req, res) => {
+  try {
+    const item = req.body?.item;
+    if (item === undefined) return res.status(400).json({ ok: false, error: 'no item' });
+    const cur = parse(await kvGet(req.params.key), []);
+    const list = Array.isArray(cur) ? cur : [];
+    list.push(item);
+    await kvSet(req.params.key, JSON.stringify(list));
+    res.json({ ok: true, value: list });
+  } catch (e) { console.error('kv append', e); res.status(500).json({ ok: false }); }
+});
 
 // ================== 카카오 알림톡 (솔라피) ==================
 const solapiReady = !!(SolapiMessageService && SOLAPI_API_KEY && SOLAPI_API_SECRET && SOLAPI_PFID);

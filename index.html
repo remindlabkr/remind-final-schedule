@@ -51,6 +51,8 @@ const RANK_PTS=[6,5,4,3,2,1];
 const slotStart=sl=>sl.split('-')[0];
 async function sg(k){try{const r=await fetch('/api/kv/'+encodeURIComponent(k));if(!r.ok)return null;const j=await r.json();return (j&&j.value!=null)?JSON.parse(j.value):null;}catch(e){return null;}}
 async function ss(k,v){try{const r=await fetch('/api/kv/'+encodeURIComponent(k),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:JSON.stringify(v)})});return r.ok;}catch(e){return false;}}
+// 원자적 append: 새 항목 1개만 서버로 보내면, 서버가 '최신' 명단에 이어붙임 → 동시제출 유실 방지. 성공 시 갱신된 배열 반환.
+async function sa(k,item){try{const r=await fetch('/api/kv-append/'+encodeURIComponent(k),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item})});if(!r.ok)return null;const j=await r.json();return (j&&j.ok)?j.value:null;}catch(e){return null;}}
 
 // ===== 결제선생(페이민트) 연동 =====
 // 주의: apiKey/hash는 절대 브라우저에 두지 않습니다. 반드시 백엔드 프록시(payssam-proxy.js)를 거칩니다.
@@ -382,9 +384,8 @@ function App() {
     setSvErr('');
     const entry={id:Date.now().toString(),name:svName.trim(),phone:svPhone.trim(),
       picks:svPicks.map(p=>({u:p.u==='__etc__'?(p.etc||'').trim():p.u})), times:[...svTimes], yaksul:svYaksul, yaksulSchools:[...svYaksulSet], at:new Date().toISOString()};
-    const next=[...surveys,entry];
-    const ok=await ss(svKey(yr,mo),next);
-    if(ok){setSurveys(next);setSvDone(true);}else{setSvErr('저장에 실패했어요. 다시 시도해주세요.');}
+    const upd=await sa(svKey(yr,mo),entry);   // 원자적 append(동시제출 유실 방지)
+    if(upd){setSurveys(upd);setSvDone(true);}else{setSvErr('저장에 실패했어요. 다시 시도해주세요.');}
   }
   async function saveSiteMode(m){
     setSiteMode(m); await ss('r15-site-mode',m);
@@ -453,10 +454,9 @@ function App() {
       vodItems:selVODArr.map(i=>({id:i.vod.id,name:i.vod.name,cheomchak:i.cheomchak,price:i.cheomchak?90000:50000})),
       totalWon:grandTotal*10000,at:new Date().toISOString(),month:mo+1,
       billId, billStatus:isCard?(payssamUrl?'sending':'manual'):'', shortUrl:''};
-    const next=[...regs,entry];
-    const ok=await ss(regKey(yr,mo),next);
-    if(!ok){setCoErr('저장에 실패했어요.');return;}
-    setRegs(next);setDoneTotal(grandTotal);setSelected(new Set());setSelVOD(new Map());setCoDone(true);
+    const upd=await sa(regKey(yr,mo),entry);   // 원자적 append(동시신청 유실 방지 — 돈 관련 중요!)
+    if(!upd){setCoErr('저장에 실패했어요.');return;}
+    setRegs(upd);setDoneTotal(grandTotal);setSelected(new Set());setSelVOD(new Map());setCoDone(true);
     notifyStudent(entry);
     if(wh)try{fetch(wh,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(entry)});}catch{}
     // 카드결제 → 결제선생 청구서 자동 발송
